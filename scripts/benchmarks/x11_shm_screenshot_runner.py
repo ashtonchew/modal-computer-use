@@ -124,6 +124,43 @@ DAEMON_LOCAL_TAIL_METRICS = (
     "daemon_unattributed_ms",
     "local_residual_ms",
 )
+X11_SCHEDULING_DIAGNOSTIC_CAPTURES = 1_000
+X11_SCHEDULING_DIAGNOSTIC_WARMUPS = 2
+X11_SCHEDULING_TAIL_THRESHOLDS_MS = (50, 100, 500)
+X11_SCHEDULING_TIMING_METRICS = (
+    "local_wall_ms",
+    "request_write_ms",
+    "response_headers_ms",
+    "body_read_ms",
+    "controller_total_ms",
+    "x11_shm_capture_encode_ms",
+    "cursor_position_ms",
+    "hash_ms",
+    "controller_unattributed_ms",
+    "route_ready_ms",
+    "route_lock_wait_ms",
+    "route_operation_ms",
+    "route_total_ms",
+    "route_outside_controller_residual_ms",
+    "local_outside_route_residual_ms",
+)
+X11_SCHEDULING_CPU_METRICS = (
+    "cgroup_usage_usec_delta",
+    "cgroup_nr_periods_delta",
+    "cgroup_nr_throttled_delta",
+    "cgroup_throttled_usec_delta",
+)
+X11_SCHEDULING_CGROUP_FIELDS = (
+    "usage_usec",
+    "nr_periods",
+    "nr_throttled",
+    "throttled_usec",
+)
+X11_SCHEDULING_SCHEDSTAT_FIELDS = (
+    "cpu_runtime_ns",
+    "runqueue_wait_ns",
+    "timeslices",
+)
 TRANSPORT_THRESHOLD_SWEEP_SPECS: tuple[dict[str, int | float | str], ...] = (
     {
         "case": "full-control",
@@ -517,8 +554,31 @@ def _is_modal_daemon_cmdline(command: bytes) -> bool:
     )
 
 
+def _is_x11_shm_worker_cmdline(command: bytes) -> bool:
+    """Match the fixed native worker argv, excluding helper-script text."""
+
+    argv = command.split(b"\0")
+    if argv and argv[-1] == b"":
+        argv.pop()
+    return bool(
+        len(argv) == 10
+        and argv[1].rsplit(b"/", 1)[-1] == b"_x11_shm_worker.py"
+        and argv[2] == b"--fd"
+        and argv[3].isdigit()
+        and argv[4] == b"--display"
+        and argv[5] == b":99"
+        and argv[6] == b"--width"
+        and argv[7] == b"1024"
+        and argv[8] == b"--height"
+        and argv[9] == b"768"
+    )
+
+
 _DAEMON_ARGV_MATCHER_SOURCE = dedent(
     inspect.getsource(_is_modal_daemon_cmdline)
+).strip()
+_X11_WORKER_ARGV_MATCHER_SOURCE = dedent(
+    inspect.getsource(_is_x11_shm_worker_cmdline)
 ).strip()
 
 
@@ -2286,6 +2346,597 @@ def _build_x11_shm_daemon_local_tail_diagnostic(
     }
 
 
+def _scheduling_nonnegative_int(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("scheduling diagnostic integer is invalid")
+    return value
+
+
+def _retain_scheduling_identity(
+    value: object,
+    *,
+    expected_module: str,
+    expected_parent_pid: int | None = None,
+) -> dict[str, int | bool | str] | None:
+    if value is None:
+        return None
+    expected_keys = {"pid", "starttime_ticks", "argv_match", "argv_module"}
+    if expected_parent_pid is not None:
+        expected_keys.add("parent_pid")
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise ValueError("scheduling diagnostic identity is invalid")
+    pid = _scheduling_nonnegative_int(value.get("pid"))
+    starttime_ticks = _scheduling_nonnegative_int(value.get("starttime_ticks"))
+    if (
+        pid < 1
+        or starttime_ticks < 1
+        or value.get("argv_match") is not True
+        or value.get("argv_module") != expected_module
+    ):
+        raise ValueError("scheduling diagnostic process identity is invalid")
+    retained: dict[str, int | bool | str] = {
+        "pid": pid,
+        "starttime_ticks": starttime_ticks,
+        "argv_match": True,
+        "argv_module": expected_module,
+    }
+    if expected_parent_pid is not None:
+        parent_pid = _scheduling_nonnegative_int(value.get("parent_pid"))
+        if parent_pid != expected_parent_pid:
+            raise ValueError("scheduling diagnostic worker parent is invalid")
+        retained["parent_pid"] = parent_pid
+    return retained
+
+
+def _retain_scheduling_counter_snapshot(
+    value: object,
+    fields: tuple[str, ...],
+) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != set(fields):
+        raise ValueError("scheduling diagnostic counter snapshot is invalid")
+    return {field: _scheduling_nonnegative_int(value.get(field)) for field in fields}
+
+
+def _scheduling_counter_delta(
+    before: Mapping[str, int],
+    after: Mapping[str, int],
+) -> dict[str, int]:
+    delta = {field: after[field] - before[field] for field in before}
+    if any(value < 0 for value in delta.values()):
+        raise ValueError("scheduling diagnostic counters are not monotonic")
+    return delta
+
+
+def _retain_scheduling_summaries(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"combined", "full", "region"}:
+        raise ValueError("scheduling diagnostic summary lanes are invalid")
+    expected_counts = {
+        "combined": X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+        "full": X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2,
+        "region": X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2,
+    }
+    expected_metrics = set(X11_SCHEDULING_TIMING_METRICS) | set(
+        X11_SCHEDULING_CPU_METRICS
+    )
+    retained: dict[str, Any] = {}
+    for lane, expected_count in expected_counts.items():
+        lane_value = value.get(lane)
+        if (
+            not isinstance(lane_value, Mapping)
+            or set(lane_value) != {"sample_count", "metrics"}
+            or lane_value.get("sample_count") != expected_count
+        ):
+            raise ValueError("scheduling diagnostic lane count is invalid")
+        metrics = lane_value.get("metrics")
+        if not isinstance(metrics, Mapping) or set(metrics) != expected_metrics:
+            raise ValueError("scheduling diagnostic summary metrics are invalid")
+        retained_metrics: dict[str, Any] = {}
+        for metric in (*X11_SCHEDULING_TIMING_METRICS, *X11_SCHEDULING_CPU_METRICS):
+            summary = metrics.get(metric)
+            percentile_keys = (
+                ("p50_ms", "p95_ms", "p99_ms", "max_ms")
+                if metric in X11_SCHEDULING_TIMING_METRICS
+                else ("p50", "p95", "p99", "max")
+            )
+            expected_keys = set(percentile_keys)
+            if metric in X11_SCHEDULING_TIMING_METRICS:
+                expected_keys.update(
+                    f"over_{threshold}_count"
+                    for threshold in X11_SCHEDULING_TAIL_THRESHOLDS_MS
+                )
+            if not isinstance(summary, Mapping) or set(summary) != expected_keys:
+                raise ValueError("scheduling diagnostic metric summary is invalid")
+            p50 = _daemon_local_nonnegative_float(summary.get(percentile_keys[0]))
+            p95 = _daemon_local_nonnegative_float(summary.get(percentile_keys[1]))
+            p99 = _daemon_local_nonnegative_float(summary.get(percentile_keys[2]))
+            maximum = _daemon_local_nonnegative_float(summary.get(percentile_keys[3]))
+            if p50 > p95 or p95 > p99 or p99 > maximum:
+                raise ValueError("scheduling diagnostic percentiles are invalid")
+            retained_summary: dict[str, int | float] = dict(
+                zip(percentile_keys, (p50, p95, p99, maximum), strict=True)
+            )
+            if metric in X11_SCHEDULING_TIMING_METRICS:
+                counts: list[int] = []
+                for threshold in X11_SCHEDULING_TAIL_THRESHOLDS_MS:
+                    count = _scheduling_nonnegative_int(
+                        summary.get(f"over_{threshold}_count")
+                    )
+                    if count > expected_count:
+                        raise ValueError("scheduling diagnostic tail count is invalid")
+                    counts.append(count)
+                if counts != sorted(counts, reverse=True):
+                    raise ValueError("scheduling diagnostic tail counts are not monotonic")
+                retained_summary.update(
+                    {
+                        f"over_{threshold}_count": count
+                        for threshold, count in zip(
+                            X11_SCHEDULING_TAIL_THRESHOLDS_MS,
+                            counts,
+                            strict=True,
+                        )
+                    }
+                )
+            retained_metrics[metric] = retained_summary
+        retained[lane] = {"sample_count": expected_count, "metrics": retained_metrics}
+    for metric in (*X11_SCHEDULING_TIMING_METRICS, *X11_SCHEDULING_CPU_METRICS):
+        combined = retained["combined"]["metrics"][metric]
+        full = retained["full"]["metrics"][metric]
+        region = retained["region"]["metrics"][metric]
+        maximum_key = (
+            "max_ms" if metric in X11_SCHEDULING_TIMING_METRICS else "max"
+        )
+        if combined[maximum_key] != max(full[maximum_key], region[maximum_key]):
+            raise ValueError("scheduling diagnostic lane maxima are inconsistent")
+        if metric in X11_SCHEDULING_TIMING_METRICS:
+            for threshold in X11_SCHEDULING_TAIL_THRESHOLDS_MS:
+                key = f"over_{threshold}_count"
+                if combined[key] != full[key] + region[key]:
+                    raise ValueError("scheduling diagnostic lane tails are inconsistent")
+    return retained
+
+
+def _retain_scheduling_tail_schedule(
+    value: object,
+    summaries: Mapping[str, Any],
+) -> dict[str, list[dict[str, int | float]]]:
+    if not isinstance(value, Mapping) or set(value) != set(
+        X11_SCHEDULING_TIMING_METRICS
+    ):
+        raise ValueError("scheduling diagnostic tail schedule is invalid")
+    retained: dict[str, list[dict[str, int | float]]] = {}
+    for metric in X11_SCHEDULING_TIMING_METRICS:
+        entries = value.get(metric)
+        if not isinstance(entries, list):
+            raise ValueError("scheduling diagnostic tail entries are invalid")
+        retained_entries: list[dict[str, int | float]] = []
+        previous_index = -1
+        for entry in entries:
+            if not isinstance(entry, Mapping) or set(entry) != {
+                "schedule_index",
+                "timing_ms",
+            }:
+                raise ValueError("scheduling diagnostic tail entry is invalid")
+            index = _scheduling_nonnegative_int(entry.get("schedule_index"))
+            timing = _daemon_local_nonnegative_float(entry.get("timing_ms"))
+            if (
+                index <= previous_index
+                or index >= X11_SCHEDULING_DIAGNOSTIC_CAPTURES
+                or timing <= X11_SCHEDULING_TAIL_THRESHOLDS_MS[0]
+            ):
+                raise ValueError("scheduling diagnostic tail record is invalid")
+            retained_entries.append({"schedule_index": index, "timing_ms": timing})
+            previous_index = index
+        combined = summaries["combined"]["metrics"][metric]
+        full = summaries["full"]["metrics"][metric]
+        region = summaries["region"]["metrics"][metric]
+        for threshold in X11_SCHEDULING_TAIL_THRESHOLDS_MS:
+            key = f"over_{threshold}_count"
+            above = [entry for entry in retained_entries if entry["timing_ms"] > threshold]
+            if (
+                len(above) != combined[key]
+                or sum(entry["schedule_index"] % 2 == 0 for entry in above)
+                != full[key]
+                or sum(entry["schedule_index"] % 2 == 1 for entry in above)
+                != region[key]
+            ):
+                raise ValueError("scheduling diagnostic tail records disagree")
+        if retained_entries:
+            if max(entry["timing_ms"] for entry in retained_entries) != combined["max_ms"]:
+                raise ValueError("scheduling diagnostic maximum disagrees")
+        elif combined["max_ms"] > X11_SCHEDULING_TAIL_THRESHOLDS_MS[0]:
+            raise ValueError("scheduling diagnostic maximum is missing")
+        retained[metric] = retained_entries
+    return retained
+
+
+def _retain_scheduling_correlations(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != set(
+        X11_SCHEDULING_TIMING_METRICS
+    ):
+        raise ValueError("scheduling diagnostic correlations are invalid")
+    retained: dict[str, Any] = {}
+    for timing_metric in X11_SCHEDULING_TIMING_METRICS:
+        row = value.get(timing_metric)
+        if not isinstance(row, Mapping) or set(row) != set(X11_SCHEDULING_CPU_METRICS):
+            raise ValueError("scheduling diagnostic correlation row is invalid")
+        retained_row: dict[str, Any] = {}
+        for cpu_metric in X11_SCHEDULING_CPU_METRICS:
+            cell = row.get(cpu_metric)
+            if not isinstance(cell, Mapping) or set(cell) != {
+                "coefficient",
+                "sample_count",
+            }:
+                raise ValueError("scheduling diagnostic correlation cell is invalid")
+            coefficient = cell.get("coefficient")
+            if coefficient is not None:
+                if (
+                    isinstance(coefficient, bool)
+                    or not isinstance(coefficient, (int, float))
+                    or not math.isfinite(coefficient)
+                    or not -1 <= coefficient <= 1
+                ):
+                    raise ValueError("scheduling diagnostic coefficient is invalid")
+                coefficient = float(coefficient)
+            if cell.get("sample_count") != X11_SCHEDULING_DIAGNOSTIC_CAPTURES:
+                raise ValueError("scheduling diagnostic correlation count is invalid")
+            retained_row[cpu_metric] = {
+                "coefficient": coefficient,
+                "sample_count": X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+            }
+        retained[timing_metric] = retained_row
+    return retained
+
+
+def _build_x11_shm_scheduling_diagnostic(
+    observation: Mapping[str, Any],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, str | bool],
+) -> dict[str, Any]:
+    validation_failed = False
+    summaries: dict[str, Any] | None = None
+    tail_schedule: dict[str, list[dict[str, int | float]]] = {}
+    correlations: dict[str, Any] | None = None
+    daemon_before: dict[str, int | bool | str] | None = None
+    daemon_after: dict[str, int | bool | str] | None = None
+    worker_before: dict[str, int | bool | str] | None = None
+    worker_after: dict[str, int | bool | str] | None = None
+    cpu_max: dict[str, int | None] | None = None
+    cgroup_before: dict[str, int] | None = None
+    cgroup_after: dict[str, int] | None = None
+    cgroup_delta: dict[str, int] | None = None
+    per_request_sums: dict[str, int] | None = None
+    daemon_schedstat_delta: dict[str, int] | None = None
+    worker_schedstat_delta: dict[str, int] | None = None
+    client_schedstat_delta: dict[str, int] | None = None
+    if observation.get("passed") is True:
+        try:
+            summaries = _retain_scheduling_summaries(observation.get("summaries"))
+            tail_schedule = _retain_scheduling_tail_schedule(
+                observation.get("tail_schedule"), summaries
+            )
+            correlations = _retain_scheduling_correlations(
+                observation.get("correlations")
+            )
+            daemon_before = _retain_scheduling_identity(
+                observation.get("daemon_identity_before"),
+                expected_module="modal_computer_use.daemon",
+            )
+            daemon_after = _retain_scheduling_identity(
+                observation.get("daemon_identity_after"),
+                expected_module="modal_computer_use.daemon",
+            )
+            worker_before = _retain_scheduling_identity(
+                observation.get("worker_identity_before"),
+                expected_module="_x11_shm_worker.py",
+                expected_parent_pid=int(daemon_before["pid"]) if daemon_before else None,
+            )
+            worker_after = _retain_scheduling_identity(
+                observation.get("worker_identity_after"),
+                expected_module="_x11_shm_worker.py",
+                expected_parent_pid=int(daemon_after["pid"]) if daemon_after else None,
+            )
+            raw_cpu_max = observation.get("cpu_max")
+            if not isinstance(raw_cpu_max, Mapping) or set(raw_cpu_max) != {
+                "quota_usec",
+                "period_usec",
+            }:
+                raise ValueError("scheduling diagnostic cpu.max is invalid")
+            quota = _scheduling_nonnegative_int(raw_cpu_max.get("quota_usec"))
+            period = _scheduling_nonnegative_int(raw_cpu_max.get("period_usec"))
+            if quota < 1 or period < 1 or quota != period:
+                raise ValueError("scheduling diagnostic is not fixed to one CPU")
+            cpu_max = {"quota_usec": quota, "period_usec": period}
+            cgroup_before = _retain_scheduling_counter_snapshot(
+                observation.get("cgroup_cpu_stat_before"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+            cgroup_after = _retain_scheduling_counter_snapshot(
+                observation.get("cgroup_cpu_stat_after"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+            cgroup_delta = _scheduling_counter_delta(cgroup_before, cgroup_after)
+            supplied_delta = _retain_scheduling_counter_snapshot(
+                observation.get("cgroup_cpu_stat_deltas"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+            if supplied_delta != cgroup_delta:
+                raise ValueError("scheduling diagnostic cgroup delta disagrees")
+            per_request_sums = _retain_scheduling_counter_snapshot(
+                observation.get("per_request_cgroup_delta_sums"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+            if any(per_request_sums[key] > cgroup_delta[key] for key in cgroup_delta):
+                raise ValueError("scheduling diagnostic sampled cgroup delta is invalid")
+            daemon_schedstat_before = _retain_scheduling_counter_snapshot(
+                observation.get("daemon_schedstat_before"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            daemon_schedstat_after = _retain_scheduling_counter_snapshot(
+                observation.get("daemon_schedstat_after"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            daemon_schedstat_delta = _scheduling_counter_delta(
+                daemon_schedstat_before, daemon_schedstat_after
+            )
+            if worker_before is None or worker_after is None:
+                raise ValueError("scheduling diagnostic worker identity is unavailable")
+            worker_schedstat_before = _retain_scheduling_counter_snapshot(
+                observation.get("worker_schedstat_before"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            worker_schedstat_after = _retain_scheduling_counter_snapshot(
+                observation.get("worker_schedstat_after"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            worker_schedstat_delta = _scheduling_counter_delta(
+                worker_schedstat_before, worker_schedstat_after
+            )
+            client_schedstat_before = _retain_scheduling_counter_snapshot(
+                observation.get("client_schedstat_before"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            client_schedstat_after = _retain_scheduling_counter_snapshot(
+                observation.get("client_schedstat_after"),
+                X11_SCHEDULING_SCHEDSTAT_FIELDS,
+            )
+            client_schedstat_delta = _scheduling_counter_delta(
+                client_schedstat_before, client_schedstat_after
+            )
+        except (TypeError, ValueError, OverflowError):
+            validation_failed = True
+            summaries = None
+            tail_schedule = {}
+            correlations = None
+            daemon_before = daemon_after = None
+            worker_before = worker_after = None
+            cpu_max = cgroup_before = cgroup_after = cgroup_delta = None
+            per_request_sums = None
+            daemon_schedstat_delta = worker_schedstat_delta = None
+            client_schedstat_delta = None
+    else:
+        # Failed diagnostics still retain independently validated numeric process
+        # and cgroup evidence. Malformed or unavailable subfields become unknown.
+        with suppress(TypeError, ValueError, OverflowError):
+            daemon_before = _retain_scheduling_identity(
+                observation.get("daemon_identity_before"),
+                expected_module="modal_computer_use.daemon",
+            )
+        with suppress(TypeError, ValueError, OverflowError):
+            daemon_after = _retain_scheduling_identity(
+                observation.get("daemon_identity_after"),
+                expected_module="modal_computer_use.daemon",
+            )
+        if daemon_before is not None:
+            with suppress(TypeError, ValueError, OverflowError):
+                worker_before = _retain_scheduling_identity(
+                    observation.get("worker_identity_before"),
+                    expected_module="_x11_shm_worker.py",
+                    expected_parent_pid=int(daemon_before["pid"]),
+                )
+        if daemon_after is not None:
+            with suppress(TypeError, ValueError, OverflowError):
+                worker_after = _retain_scheduling_identity(
+                    observation.get("worker_identity_after"),
+                    expected_module="_x11_shm_worker.py",
+                    expected_parent_pid=int(daemon_after["pid"]),
+                )
+        with suppress(TypeError, ValueError, OverflowError):
+            raw_cpu_max = observation.get("cpu_max")
+            if isinstance(raw_cpu_max, Mapping) and set(raw_cpu_max) == {
+                "quota_usec",
+                "period_usec",
+            }:
+                raw_quota = raw_cpu_max.get("quota_usec")
+                quota = (
+                    None
+                    if raw_quota is None
+                    else _scheduling_nonnegative_int(raw_quota)
+                )
+                period = _scheduling_nonnegative_int(raw_cpu_max.get("period_usec"))
+                if period > 0 and (quota is None or quota > 0):
+                    cpu_max = {"quota_usec": quota, "period_usec": period}
+        with suppress(TypeError, ValueError, OverflowError):
+            cgroup_before = _retain_scheduling_counter_snapshot(
+                observation.get("cgroup_cpu_stat_before"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+        with suppress(TypeError, ValueError, OverflowError):
+            cgroup_after = _retain_scheduling_counter_snapshot(
+                observation.get("cgroup_cpu_stat_after"),
+                X11_SCHEDULING_CGROUP_FIELDS,
+            )
+        if cgroup_before is not None and cgroup_after is not None:
+            with suppress(TypeError, ValueError, OverflowError):
+                cgroup_delta = _scheduling_counter_delta(cgroup_before, cgroup_after)
+        for prefix, destination in (
+            ("daemon", "daemon"),
+            ("worker", "worker"),
+            ("client", "client"),
+        ):
+            try:
+                before = _retain_scheduling_counter_snapshot(
+                    observation.get(f"{prefix}_schedstat_before"),
+                    X11_SCHEDULING_SCHEDSTAT_FIELDS,
+                )
+                after = _retain_scheduling_counter_snapshot(
+                    observation.get(f"{prefix}_schedstat_after"),
+                    X11_SCHEDULING_SCHEDSTAT_FIELDS,
+                )
+                delta = _scheduling_counter_delta(before, after)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if destination == "daemon":
+                daemon_schedstat_delta = delta
+            elif destination == "worker":
+                worker_schedstat_delta = delta
+            else:
+                client_schedstat_delta = delta
+
+    retained_provenance = _retain_daemon_local_provenance(provenance)
+    captures_completed = _retain_daemon_local_count(
+        observation.get("captures_completed"),
+        maximum=X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    )
+    warmups_completed = _retain_daemon_local_count(
+        observation.get("warmups_completed"),
+        maximum=X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+    )
+    full_captures = _retain_daemon_local_count(
+        observation.get("full_captures"),
+        maximum=X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2,
+    )
+    region_captures = _retain_daemon_local_count(
+        observation.get("region_captures"),
+        maximum=X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2,
+    )
+    count_prefix_valid = bool(
+        captures_completed is not None
+        and full_captures is not None
+        and region_captures is not None
+        and full_captures + region_captures == captures_completed
+        and full_captures == (captures_completed + 1) // 2
+        and region_captures == captures_completed // 2
+    )
+    if not count_prefix_valid:
+        if observation.get("passed") is True:
+            validation_failed = True
+        else:
+            captures_completed = full_captures = region_captures = None
+    daemon_same = bool(
+        daemon_before
+        and daemon_after
+        and daemon_before["pid"] == daemon_after["pid"]
+        and daemon_before["starttime_ticks"] == daemon_after["starttime_ticks"]
+    )
+    worker_same = bool(
+        worker_before
+        and worker_after
+        and worker_before["pid"] == worker_after["pid"]
+        and worker_before["starttime_ticks"] == worker_after["starttime_ticks"]
+    )
+    cleanup_succeeded = cleanup.get("succeeded") is True and cleanup.get(
+        "remaining_sandboxes"
+    ) == 0
+    observed_backend = _safe_diagnostic_label(observation.get("observed_backend"))
+    contract_matches = bool(
+        observation.get("requested_source") == "x11-shm"
+        and observed_backend == "x11-shm"
+        and observation.get("warmups_requested") == X11_SCHEDULING_DIAGNOSTIC_WARMUPS
+        and warmups_completed == X11_SCHEDULING_DIAGNOSTIC_WARMUPS
+        and observation.get("captures_requested") == X11_SCHEDULING_DIAGNOSTIC_CAPTURES
+        and count_prefix_valid
+        and captures_completed == X11_SCHEDULING_DIAGNOSTIC_CAPTURES
+        and full_captures == X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2
+        and region_captures == X11_SCHEDULING_DIAGNOSTIC_CAPTURES // 2
+        and daemon_same
+        and worker_same
+        and summaries is not None
+        and correlations is not None
+        and cpu_max is not None
+        and cgroup_delta is not None
+        and daemon_schedstat_delta is not None
+        and worker_schedstat_delta is not None
+        and client_schedstat_delta is not None
+        and retained_provenance is not None
+    )
+    if observation.get("passed") is True and not contract_matches:
+        validation_failed = True
+    passed = bool(
+        observation.get("passed") is True
+        and not validation_failed
+        and contract_matches
+        and cleanup_succeeded
+    )
+    failure_type = (
+        "EvidenceValidationError"
+        if validation_failed
+        else "CleanupError"
+        if observation.get("passed") is True and not cleanup_succeeded
+        else _safe_diagnostic_label(observation.get("failure_type"))
+    )
+    failure_phase = (
+        "artifact_validation"
+        if validation_failed
+        else "terminal_cleanup"
+        if observation.get("passed") is True and not cleanup_succeeded
+        else _safe_diagnostic_label(observation.get("failure_phase"))
+    )
+    retained_cleanup = {
+        "succeeded": cleanup.get("succeeded") is True,
+        "remaining_sandboxes": _retain_daemon_local_count(
+            cleanup.get("remaining_sandboxes"), maximum=100
+        ),
+        "survivors_before_sweep": _retain_daemon_local_count(
+            cleanup.get("survivors_before_sweep"), maximum=100
+        ),
+    }
+    return {
+        "schema_version": "x11-shm-scheduling-diagnostic.v1",
+        "benchmark": "x11-shm-scheduling-diagnostic",
+        "status": "complete",
+        "passed": passed,
+        "scope": "daemon-local-scheduling-mechanism-only",
+        "non_gating": True,
+        "promotion_proxy": False,
+        "endpoint_order_confounded": True,
+        "instrumentation_intrusive": True,
+        "requested_source": "x11-shm",
+        "observed_backend": observed_backend,
+        "warmups_requested": X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+        "warmups_completed": warmups_completed,
+        "expected_sample_count": X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+        "sample_count": captures_completed,
+        "captures_requested": X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+        "captures_completed": captures_completed,
+        "full_captures": full_captures,
+        "region_captures": region_captures,
+        "daemon_identity_before": daemon_before,
+        "daemon_identity_after": daemon_after,
+        "daemon_identity_same": daemon_same,
+        "worker_identity_before": worker_before,
+        "worker_identity_after": worker_after,
+        "worker_identity_same": worker_same,
+        "worker_schedstat_available": worker_schedstat_delta is not None,
+        "cpu_max": cpu_max,
+        "cgroup_cpu_stat_before": cgroup_before,
+        "cgroup_cpu_stat_after": cgroup_after,
+        "cgroup_cpu_stat_deltas": cgroup_delta,
+        "per_request_cgroup_delta_sums": per_request_sums,
+        "daemon_schedstat_delta": daemon_schedstat_delta,
+        "worker_schedstat_delta": worker_schedstat_delta,
+        "client_schedstat_delta": client_schedstat_delta,
+        "summaries": summaries,
+        "tail_schedule": tail_schedule,
+        "correlations": correlations,
+        "failure_type": failure_type,
+        "failure_phase": failure_phase,
+        "retries": 0,
+        "replacement_samples": 0,
+        "provenance": retained_provenance,
+        "terminal_cleanup": retained_cleanup,
+    }
+
+
 def _build_x11_shm_soak_diagnostic_script(
     captures: int,
     *,
@@ -2809,6 +3460,640 @@ def _build_x11_shm_daemon_local_tail_script(
         }}))
         """
     )
+
+
+def _build_x11_shm_scheduling_diagnostic_script(
+    *,
+    captures: int = X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    warmups: int = X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+) -> str:
+    if captures != X11_SCHEDULING_DIAGNOSTIC_CAPTURES:
+        raise ValueError("scheduling diagnostic requires exactly 1000 captures")
+    if warmups != X11_SCHEDULING_DIAGNOSTIC_WARMUPS:
+        raise ValueError("scheduling diagnostic requires exactly 2 warmups")
+    template = dedent(
+        """
+        import http.client
+        import json
+        import math
+        import os
+        import time
+        from pathlib import Path
+
+        __DAEMON_MATCHER__
+
+        __WORKER_MATCHER__
+
+        CAPTURES = __CAPTURES__
+        WARMUPS = __WARMUPS__
+        TAIL_THRESHOLDS_MS = (50, 100, 500)
+        TIMING_METRICS = (
+            "local_wall_ms",
+            "request_write_ms",
+            "response_headers_ms",
+            "body_read_ms",
+            "controller_total_ms",
+            "x11_shm_capture_encode_ms",
+            "cursor_position_ms",
+            "hash_ms",
+            "controller_unattributed_ms",
+            "route_ready_ms",
+            "route_lock_wait_ms",
+            "route_operation_ms",
+            "route_total_ms",
+            "route_outside_controller_residual_ms",
+            "local_outside_route_residual_ms",
+        )
+        CGROUP_FIELDS = (
+            "usage_usec", "nr_periods", "nr_throttled", "throttled_usec",
+        )
+        CPU_METRICS = tuple("cgroup_" + field + "_delta" for field in CGROUP_FIELDS)
+        SCHEDSTAT_FIELDS = ("cpu_runtime_ns", "runqueue_wait_ns", "timeslices")
+
+        def process_stat(pid):
+            try:
+                stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+                fields = stat_text.rsplit(") ", 1)[1].split()
+                return {"ppid": int(fields[1]), "starttime_ticks": int(fields[19])}
+            except (OSError, IndexError, ValueError):
+                return None
+
+        def daemon_identity():
+            matches = []
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes()
+                except OSError:
+                    continue
+                if not _is_modal_daemon_cmdline(command):
+                    continue
+                stat = process_stat(int(entry.name))
+                if stat is not None:
+                    matches.append({
+                        "pid": int(entry.name),
+                        "starttime_ticks": stat["starttime_ticks"],
+                        "argv_match": True,
+                        "argv_module": "modal_computer_use.daemon",
+                    })
+            return matches[0] if len(matches) == 1 else None
+
+        def worker_identity(daemon_pid):
+            matches = []
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes()
+                except OSError:
+                    continue
+                if not _is_x11_shm_worker_cmdline(command):
+                    continue
+                stat = process_stat(int(entry.name))
+                if stat is not None and stat["ppid"] == daemon_pid:
+                    matches.append({
+                        "pid": int(entry.name),
+                        "starttime_ticks": stat["starttime_ticks"],
+                        "parent_pid": stat["ppid"],
+                        "argv_match": True,
+                        "argv_module": "_x11_shm_worker.py",
+                    })
+            return matches[0] if len(matches) == 1 else None
+
+        def schedstat(pid):
+            try:
+                fields = Path(f"/proc/{pid}/schedstat").read_text(
+                    encoding="utf-8"
+                ).split()
+                values = [int(value) for value in fields[:3]]
+            except (OSError, ValueError):
+                return None
+            if len(values) != 3 or any(value < 0 for value in values):
+                return None
+            return dict(zip(SCHEDSTAT_FIELDS, values))
+
+        def cgroup_directory():
+            try:
+                for line in Path("/proc/self/cgroup").read_text(
+                    encoding="utf-8"
+                ).splitlines():
+                    hierarchy, controllers, relative = line.split(":", 2)
+                    if hierarchy == "0" and controllers == "":
+                        candidate = Path("/sys/fs/cgroup") / relative.lstrip("/")
+                        if (candidate / "cpu.stat").is_file():
+                            return candidate
+            except (OSError, ValueError):
+                pass
+            fallback = Path("/sys/fs/cgroup")
+            return fallback if (fallback / "cpu.stat").is_file() else None
+
+        def cpu_stat(directory):
+            if directory is None:
+                return None
+            try:
+                parsed = {
+                    parts[0]: int(parts[1])
+                    for line in (directory / "cpu.stat").read_text(
+                        encoding="utf-8"
+                    ).splitlines()
+                    if len(parts := line.split()) == 2
+                }
+            except (OSError, ValueError):
+                return None
+            if any(parsed.get(field, -1) < 0 for field in CGROUP_FIELDS):
+                return None
+            return {field: parsed[field] for field in CGROUP_FIELDS}
+
+        def cpu_max(directory):
+            if directory is None:
+                return None
+            try:
+                quota_text, period_text = (directory / "cpu.max").read_text(
+                    encoding="utf-8"
+                ).split()
+                period = int(period_text)
+                quota = None if quota_text == "max" else int(quota_text)
+            except (OSError, ValueError):
+                return None
+            if period < 1 or (quota is not None and quota < 1):
+                return None
+            return {"quota_usec": quota, "period_usec": period}
+
+        def timing_header(response):
+            raw = response.getheader("x-computer-use-timing-ms")
+            if raw is None:
+                raise RuntimeError("timing header unavailable")
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                raise RuntimeError("timing header invalid") from None
+            if not isinstance(parsed, dict):
+                raise RuntimeError("timing header invalid")
+            retained = {}
+            for key in (
+                "total_ms", "x11_shm_capture_encode_ms", "cursor_position_ms",
+                "hash_ms", "route_ready_ms", "route_lock_wait_ms",
+                "route_operation_ms", "route_total_ms",
+            ):
+                value = parsed.get(key)
+                if value is None and key == "cursor_position_ms":
+                    value = 0.0
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < 0
+                ):
+                    raise RuntimeError("timing header stage invalid")
+                retained[key] = float(value)
+            if retained["route_total_ms"] < sum(
+                retained[key]
+                for key in (
+                    "route_ready_ms", "route_lock_wait_ms", "route_operation_ms"
+                )
+            ):
+                raise RuntimeError("route timing algebra invalid")
+            if retained["route_operation_ms"] < retained["total_ms"]:
+                raise RuntimeError("controller timing exceeds route operation")
+            if retained["total_ms"] + 1e-6 < sum(
+                retained[key]
+                for key in (
+                    "x11_shm_capture_encode_ms", "cursor_position_ms", "hash_ms"
+                )
+            ):
+                raise RuntimeError("controller timing algebra invalid")
+            return retained
+
+        def percentile(values, percent):
+            ordered = sorted(values)
+            index = max(0, math.ceil(len(ordered) * percent / 100) - 1)
+            return float(ordered[index])
+
+        def bounded_residual(outer, inner):
+            residual = outer - inner
+            if residual < -1e-6:
+                raise RuntimeError("timing residual algebra invalid")
+            return 0.0 if residual < 0 else residual
+
+        def summarize(rows):
+            metrics = {}
+            for metric in TIMING_METRICS:
+                values = [row[metric] for row in rows]
+                metrics[metric] = {
+                    "p50_ms": percentile(values, 50),
+                    "p95_ms": percentile(values, 95),
+                    "p99_ms": percentile(values, 99),
+                    "max_ms": max(values),
+                    **{
+                        f"over_{threshold}_count": sum(
+                            value > threshold for value in values
+                        )
+                        for threshold in TAIL_THRESHOLDS_MS
+                    },
+                }
+            for metric in CPU_METRICS:
+                values = [row[metric] for row in rows]
+                metrics[metric] = {
+                    "p50": percentile(values, 50),
+                    "p95": percentile(values, 95),
+                    "p99": percentile(values, 99),
+                    "max": max(values),
+                }
+            return {"sample_count": len(rows), "metrics": metrics}
+
+        def correlation(rows, first, second):
+            first_values = [row[first] for row in rows]
+            second_values = [row[second] for row in rows]
+            first_mean = sum(first_values) / len(first_values)
+            second_mean = sum(second_values) / len(second_values)
+            first_variance = sum((value - first_mean) ** 2 for value in first_values)
+            second_variance = sum((value - second_mean) ** 2 for value in second_values)
+            if first_variance == 0 or second_variance == 0:
+                coefficient = None
+            else:
+                covariance = sum(
+                    (first_value - first_mean) * (second_value - second_mean)
+                    for first_value, second_value in zip(
+                        first_values, second_values
+                    )
+                )
+                coefficient = max(
+                    -1.0,
+                    min(
+                        1.0,
+                        covariance / math.sqrt(first_variance * second_variance),
+                    ),
+                )
+            return {"coefficient": coefficient, "sample_count": len(rows)}
+
+        token = os.environ["COMPUTER_USE_TUNNEL_TOKEN"]
+        port = int(os.environ.get("COMPUTER_USE_DAEMON_PORT", "8080"))
+        request_headers = {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        }
+        full_payload = json.dumps({
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+        })
+        region_payload = json.dumps({
+            "format": "png", "quality": 90, "scale": 1.0,
+            "show_cursor": False, "processing": "auto", "storage": "inline",
+            "region": {"x": 7, "y": 9, "width": 511, "height": 383},
+        })
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        directory = cgroup_directory()
+        cpu_limit = cpu_max(directory)
+        samples = []
+        observed_backend = None
+        warmups_completed = 0
+        captures_completed = 0
+        full_captures = 0
+        region_captures = 0
+        daemon_before = None
+        daemon_after = None
+        worker_before = None
+        worker_after = None
+        daemon_sched_before = None
+        daemon_sched_after = None
+        worker_sched_before = None
+        worker_sched_after = None
+        client_sched_before = None
+        client_sched_after = None
+        cgroup_before = None
+        cgroup_after = None
+        failure_type = None
+        failure_phase = "warmup"
+
+        def request(index, *, measured):
+            nonlocal_observed = None
+            lane = "full" if index % 2 == 0 else "region"
+            path = (
+                "/v1/screenshots/full/raw"
+                if lane == "full"
+                else "/v1/screenshots/region/raw"
+            )
+            payload = full_payload if lane == "full" else region_payload
+            expected_width, expected_height = (1024, 768) if lane == "full" else (511, 383)
+            cpu_before_request = cpu_stat(directory) if measured else None
+            started_ns = time.perf_counter_ns()
+            connection.request("POST", path, body=payload, headers=request_headers)
+            wrote_ns = time.perf_counter_ns()
+            response = connection.getresponse()
+            headers_ns = time.perf_counter_ns()
+            payload_content = response.read()
+            finished_ns = time.perf_counter_ns()
+            cpu_after_request = cpu_stat(directory) if measured else None
+            if response.status != 200 or not payload_content.startswith(b"\\x89PNG"):
+                raise RuntimeError("daemon-local screenshot failed")
+            backend = response.getheader("x-computer-use-capture-backend")
+            if backend != "x11-shm":
+                raise RuntimeError("daemon-local screenshot used an unexpected source")
+            if int(response.getheader("x-computer-use-width", "-1")) != expected_width:
+                raise RuntimeError("daemon-local screenshot width changed")
+            if int(response.getheader("x-computer-use-height", "-1")) != expected_height:
+                raise RuntimeError("daemon-local screenshot height changed")
+            if int(response.getheader("x-computer-use-size-bytes", "-1")) != len(payload_content):
+                raise RuntimeError("daemon-local screenshot size changed")
+            stages = timing_header(response)
+            if lane == "region" and stages["cursor_position_ms"] != 0:
+                raise RuntimeError("region timing unexpectedly contains cursor work")
+            del payload_content
+            nonlocal_observed = backend
+            if not measured:
+                return None, nonlocal_observed
+            if cpu_before_request is None or cpu_after_request is None:
+                raise RuntimeError("cgroup cpu.stat unavailable")
+            cpu_delta = {
+                field: cpu_after_request[field] - cpu_before_request[field]
+                for field in CGROUP_FIELDS
+            }
+            if any(value < 0 for value in cpu_delta.values()):
+                raise RuntimeError("cgroup cpu.stat counters regressed")
+            wall_ms = (finished_ns - started_ns) / 1_000_000
+            write_ms = (wrote_ns - started_ns) / 1_000_000
+            response_headers_ms = (headers_ns - wrote_ns) / 1_000_000
+            body_read_ms = (finished_ns - headers_ns) / 1_000_000
+            if wall_ms + 1e-6 < write_ms + response_headers_ms + body_read_ms:
+                raise RuntimeError("client timing algebra invalid")
+            controller_components = (
+                stages["x11_shm_capture_encode_ms"]
+                + stages["cursor_position_ms"]
+                + stages["hash_ms"]
+            )
+            controller_unattributed = bounded_residual(
+                stages["total_ms"], controller_components
+            )
+            row = {
+                "schedule_index": index,
+                "lane": lane,
+                "local_wall_ms": wall_ms,
+                "request_write_ms": write_ms,
+                "response_headers_ms": response_headers_ms,
+                "body_read_ms": body_read_ms,
+                "controller_total_ms": stages["total_ms"],
+                "x11_shm_capture_encode_ms": stages["x11_shm_capture_encode_ms"],
+                "cursor_position_ms": stages["cursor_position_ms"],
+                "hash_ms": stages["hash_ms"],
+                "controller_unattributed_ms": controller_unattributed,
+                "route_ready_ms": stages["route_ready_ms"],
+                "route_lock_wait_ms": stages["route_lock_wait_ms"],
+                "route_operation_ms": stages["route_operation_ms"],
+                "route_total_ms": stages["route_total_ms"],
+                "route_outside_controller_residual_ms": bounded_residual(
+                    stages["route_total_ms"], stages["total_ms"]
+                ),
+                "local_outside_route_residual_ms": bounded_residual(
+                    wall_ms, stages["route_total_ms"]
+                ),
+                **{
+                    "cgroup_" + field + "_delta": value
+                    for field, value in cpu_delta.items()
+                },
+            }
+            return row, nonlocal_observed
+
+        try:
+            for warmup_index in range(WARMUPS):
+                _, observed_backend = request(warmup_index, measured=False)
+                warmups_completed += 1
+            failure_phase = "identity_before"
+            daemon_before = daemon_identity()
+            if daemon_before is None:
+                raise RuntimeError("daemon process identity unavailable")
+            worker_before = worker_identity(daemon_before["pid"])
+            if worker_before is None:
+                raise RuntimeError("x11-shm worker identity unavailable")
+            daemon_sched_before = schedstat(daemon_before["pid"])
+            client_sched_before = schedstat(os.getpid())
+            if daemon_sched_before is None or client_sched_before is None:
+                raise RuntimeError("required schedstat unavailable")
+            worker_sched_before = schedstat(worker_before["pid"])
+            if worker_sched_before is None:
+                raise RuntimeError("x11-shm worker schedstat unavailable")
+            failure_phase = "cgroup_before"
+            cgroup_before = cpu_stat(directory)
+            if cgroup_before is None or cpu_limit is None:
+                raise RuntimeError("cgroup v2 cpu metrics unavailable")
+            if (
+                not isinstance(cpu_limit["quota_usec"], int)
+                or cpu_limit["quota_usec"] < 1
+                or cpu_limit["quota_usec"] != cpu_limit["period_usec"]
+            ):
+                raise RuntimeError("scheduling diagnostic requires fixed one CPU")
+            failure_phase = "captures"
+            for index in range(CAPTURES):
+                row, observed_backend = request(index, measured=True)
+                samples.append(row)
+                captures_completed += 1
+                if index % 2 == 0:
+                    full_captures += 1
+                else:
+                    region_captures += 1
+            failure_phase = "cgroup_after"
+            cgroup_after = cpu_stat(directory)
+            if cgroup_after is None:
+                raise RuntimeError("terminal cgroup cpu.stat unavailable")
+            failure_phase = "identity_after"
+            daemon_after = daemon_identity()
+            if daemon_after is None:
+                raise RuntimeError("terminal daemon identity unavailable")
+            worker_after = worker_identity(daemon_after["pid"])
+            if worker_after is None:
+                raise RuntimeError("terminal x11-shm worker identity unavailable")
+            daemon_sched_after = schedstat(daemon_after["pid"])
+            client_sched_after = schedstat(os.getpid())
+            if daemon_sched_after is None or client_sched_after is None:
+                raise RuntimeError("terminal required schedstat unavailable")
+            worker_sched_after = schedstat(worker_after["pid"])
+            if worker_sched_after is None:
+                raise RuntimeError("terminal x11-shm worker schedstat unavailable")
+            if (
+                daemon_after["pid"] != daemon_before["pid"]
+                or daemon_after["starttime_ticks"] != daemon_before["starttime_ticks"]
+                or (worker_before is None) != (worker_after is None)
+                or (
+                    worker_before is not None
+                    and (
+                        worker_after["pid"] != worker_before["pid"]
+                        or worker_after["starttime_ticks"]
+                        != worker_before["starttime_ticks"]
+                    )
+                )
+            ):
+                raise RuntimeError("diagnostic process identity changed")
+            failure_phase = "summarize"
+            summaries = {
+                "combined": summarize(samples),
+                "full": summarize([row for row in samples if row["lane"] == "full"]),
+                "region": summarize([row for row in samples if row["lane"] == "region"]),
+            }
+            tail_schedule = {
+                metric: [
+                    {
+                        "schedule_index": row["schedule_index"],
+                        "timing_ms": row[metric],
+                    }
+                    for row in samples
+                    if row[metric] > TAIL_THRESHOLDS_MS[0]
+                ]
+                for metric in TIMING_METRICS
+            }
+            correlations = {
+                timing_metric: {
+                    cpu_metric: correlation(samples, timing_metric, cpu_metric)
+                    for cpu_metric in CPU_METRICS
+                }
+                for timing_metric in TIMING_METRICS
+            }
+            per_request_sums = {
+                field: sum(row["cgroup_" + field + "_delta"] for row in samples)
+                for field in CGROUP_FIELDS
+            }
+            cgroup_delta = {
+                field: cgroup_after[field] - cgroup_before[field]
+                for field in CGROUP_FIELDS
+            }
+            if (
+                any(value < 0 for value in cgroup_delta.values())
+                or any(per_request_sums[field] > cgroup_delta[field] for field in CGROUP_FIELDS)
+            ):
+                raise RuntimeError("cgroup cpu.stat aggregate is inconsistent")
+        except Exception as exc:
+            failure_type = type(exc).__name__
+            summaries = None
+            tail_schedule = {}
+            correlations = None
+            per_request_sums = None
+            cgroup_delta = None
+        finally:
+            connection.close()
+
+        print(json.dumps({
+            "passed": failure_type is None,
+            "requested_source": "x11-shm",
+            "observed_backend": observed_backend,
+            "warmups_requested": WARMUPS,
+            "warmups_completed": warmups_completed,
+            "captures_requested": CAPTURES,
+            "captures_completed": captures_completed,
+            "full_captures": full_captures,
+            "region_captures": region_captures,
+            "daemon_identity_before": daemon_before,
+            "daemon_identity_after": daemon_after,
+            "worker_identity_before": worker_before,
+            "worker_identity_after": worker_after,
+            "daemon_schedstat_before": daemon_sched_before,
+            "daemon_schedstat_after": daemon_sched_after,
+            "worker_schedstat_before": worker_sched_before,
+            "worker_schedstat_after": worker_sched_after,
+            "client_schedstat_before": client_sched_before,
+            "client_schedstat_after": client_sched_after,
+            "cpu_max": cpu_limit,
+            "cgroup_cpu_stat_before": cgroup_before,
+            "cgroup_cpu_stat_after": cgroup_after,
+            "cgroup_cpu_stat_deltas": cgroup_delta,
+            "per_request_cgroup_delta_sums": per_request_sums,
+            "summaries": summaries,
+            "tail_schedule": tail_schedule,
+            "correlations": correlations,
+            "failure_type": failure_type,
+            "failure_phase": failure_phase if failure_type is not None else None,
+        }))
+        """
+    )
+    return (
+        template.replace("__DAEMON_MATCHER__", _DAEMON_ARGV_MATCHER_SOURCE)
+        .replace("__WORKER_MATCHER__", _X11_WORKER_ARGV_MATCHER_SOURCE)
+        .replace("__CAPTURES__", str(captures))
+        .replace("__WARMUPS__", str(warmups))
+    )
+
+
+async def _run_x11_shm_scheduling_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    captures: int = X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    warmups: int = X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+) -> dict[str, Any]:
+    if captures != X11_SCHEDULING_DIAGNOSTIC_CAPTURES:
+        raise ValueError("scheduling diagnostic requires exactly 1000 captures")
+    if warmups != X11_SCHEDULING_DIAGNOSTIC_WARMUPS:
+        raise ValueError("scheduling diagnostic requires exactly 2 warmups")
+    context = factory()
+    computer: Any | None = None
+    phase = "context_enter"
+    observation: dict[str, Any] | None = None
+    try:
+        computer = await context.__aenter__()
+        phase = "sandbox_handle"
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for scheduling diagnostic")
+        script = _build_x11_shm_scheduling_diagnostic_script(
+            captures=captures,
+            warmups=warmups,
+        )
+        phase = "daemon_local_child"
+        process = await sandbox.exec.aio("python", "-c", script, timeout=600)
+        exit_code = await process.wait.aio()
+        raw = await _process_stdout_text(process)
+        if exit_code != 0:
+            raise RuntimeError("scheduling diagnostic child exited")
+        if not raw:
+            raise RuntimeError("scheduling diagnostic child returned empty output")
+        phase = "parse_child_output"
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("scheduling diagnostic returned invalid output")
+        observation = payload
+    except Exception as exc:
+        observation = {
+            "passed": False,
+            "requested_source": "x11-shm",
+            "observed_backend": None,
+            "warmups_requested": warmups,
+            "warmups_completed": 0,
+            "captures_requested": captures,
+            "captures_completed": 0,
+            "full_captures": 0,
+            "region_captures": 0,
+            "failure_type": type(exc).__name__,
+            "failure_phase": phase,
+        }
+    finally:
+        if computer is not None:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                if observation is None:
+                    observation = {
+                        "passed": False,
+                        "requested_source": "x11-shm",
+                        "observed_backend": None,
+                        "warmups_requested": warmups,
+                        "warmups_completed": 0,
+                        "captures_requested": captures,
+                        "captures_completed": 0,
+                        "full_captures": 0,
+                        "region_captures": 0,
+                    }
+                observation["passed"] = False
+                observation["failure_type"] = type(exc).__name__
+                observation["failure_phase"] = "context_cleanup"
+    return observation or {
+        "passed": False,
+        "requested_source": "x11-shm",
+        "warmups_requested": warmups,
+        "warmups_completed": 0,
+        "captures_requested": captures,
+        "captures_completed": 0,
+        "full_captures": 0,
+        "region_captures": 0,
+        "failure_type": "NoResult",
+        "failure_phase": phase,
+    }
 
 
 async def _run_x11_shm_daemon_local_tail_diagnostic(
@@ -4337,6 +5622,59 @@ def run_x11_shm_daemon_local_tail_diagnostic(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=1_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_scheduling_diagnostic(
+    captures: int = X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    warmups: int = X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one instrumentation-intrusive, non-gating scheduling diagnostic."""
+
+    if captures != X11_SCHEDULING_DIAGNOSTIC_CAPTURES:
+        raise ValueError("scheduling diagnostic requires exactly 1000 captures")
+    if warmups != X11_SCHEDULING_DIAGNOSTIC_WARMUPS:
+        raise ValueError("scheduling diagnostic requires exactly 2 warmups")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            observation = await _run_x11_shm_scheduling_diagnostic(
+                lambda: _ArmContext("x11-shm"),
+                captures=captures,
+                warmups=warmups,
+            )
+        except BaseException as exc:
+            observation = {
+                "passed": False,
+                "requested_source": "x11-shm",
+                "observed_backend": None,
+                "warmups_requested": warmups,
+                "warmups_completed": 0,
+                "captures_requested": captures,
+                "captures_completed": 0,
+                "full_captures": 0,
+                "region_captures": 0,
+                "failure_type": type(exc).__name__,
+                "failure_phase": "diagnostic",
+            }
+        cleanup = await _final_sandbox_cleanup()
+        return _build_x11_shm_scheduling_diagnostic(
+            observation,
+            cleanup,
+            provenance,
+        )
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -4462,6 +5800,27 @@ def x11_shm_daemon_local_tail_main(
         Path(output)
         if output
         else Path("benchmark-data/x11-shm-daemon-local-tail-1000.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_scheduling_diagnostic_main(
+    captures: int = X11_SCHEDULING_DIAGNOSTIC_CAPTURES,
+    warmups: int = X11_SCHEDULING_DIAGNOSTIC_WARMUPS,
+    output: str = "",
+) -> None:
+    result = run_x11_shm_scheduling_diagnostic.remote(
+        captures=captures,
+        warmups=warmups,
+        provenance=_local_provenance(),
+    )
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-scheduling-diagnostic-1000.json")
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
