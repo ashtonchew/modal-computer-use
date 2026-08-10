@@ -475,7 +475,7 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
     if (
         not isinstance(payload, dict)
         or payload.get("backend") != "x11-shm"
-        or payload.get("codec") != "png-deflate-level2-no-filter"
+        or payload.get("codec") != "png-deflate-level1-no-filter"
         or not isinstance(payload.get("module_sha256"), str)
         or not str(payload.get("image_object_id", "")).startswith("im-")
     ):

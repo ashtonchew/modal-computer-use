@@ -43,7 +43,7 @@ pyo3::create_exception!(
 use xcb::{shm, x, Connection};
 
 const BACKEND_MARKER: &str = "x11-shm";
-const CODEC_MARKER: &str = "png-deflate-level2-no-filter";
+const CODEC_MARKER: &str = "png-deflate-level1-no-filter";
 const X11_REPLY_TIMEOUT_MS: u64 = 750;
 #[cfg(target_os = "linux")]
 const X11_REPLY_TIMEOUT: Duration = Duration::from_millis(X11_REPLY_TIMEOUT_MS);
@@ -226,10 +226,11 @@ impl RgbPngEncoder {
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
         // `Compression::Fast` in png 0.18 selects fdeflate's ultra-fast
-        // profile, not zlib level 1.  This final candidate keeps MSS's
-        // filter-0 policy while testing a level-two DEFLATE tradeoff; it
+        // profile, not zlib level 1.  The general route is compared against
+        // MSS's level-1 encoder, so select the explicit level here.  The
+        // Use MSS's filter-0 and level-one policy; the Rust implementation
         // remains a separate codec and must be validated against live MSS.
-        encoder.set_deflate_compression(png::DeflateCompression::Level(2));
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
         encoder.set_filter(png::Filter::NoFilter);
         let mut writer = encoder.write_header().context("PNG header write failed")?;
         writer
@@ -883,7 +884,7 @@ mod tests {
     #[test]
     fn native_markers_keep_backend_and_codec_semantic() {
         assert_eq!(BACKEND_MARKER, "x11-shm");
-        assert_eq!(CODEC_MARKER, "png-deflate-level2-no-filter");
+        assert_eq!(CODEC_MARKER, "png-deflate-level1-no-filter");
     }
 
     #[test]
@@ -1095,6 +1096,7 @@ mod tests {
         assert_eq!(&decoded[..info.buffer_size()], &[30, 20, 10, 60, 50, 40]);
     }
 
+    #[cfg(target_os = "linux")]
     fn representative_browser_rgb(width: u16, height: u16) -> Vec<u8> {
         let width = width as usize;
         let height = height as usize;
@@ -1171,52 +1173,32 @@ mod tests {
         for (width, height) in [(1024_u16, 768_u16), (511_u16, 383_u16)] {
             let rgb = representative_browser_rgb(width, height);
             let native = encode_native_rgb(&rgb, width, height);
-            let reference = encode_reference_png(&rgb, width, height, png::Filter::NoFilter, 2);
+            let reference = encode_reference_png(&rgb, width, height, png::Filter::NoFilter);
             let (native_width, native_height, native_rgb) = decode_rgb_png(&native);
             assert_eq!(
                 (native_width, native_height, native_rgb),
                 (u32::from(width), u32::from(height), rgb),
-                "Level2 NoFilter PNG changed decoded RGB for {width}x{height}"
+                "NoFilter PNG changed decoded RGB for {width}x{height}"
             );
             assert_eq!(
                 native.len(),
                 reference.len(),
-                "native Level2 NoFilter PNG differs from the reference payload for {width}x{height}"
+                "native NoFilter PNG differs from the reference payload for {width}x{height}"
             );
         }
     }
 
-    fn encode_reference_png(
-        rgb: &[u8],
-        width: u16,
-        height: u16,
-        filter: png::Filter,
-        level: u8,
-    ) -> Vec<u8> {
+    #[cfg(target_os = "linux")]
+    fn encode_reference_png(rgb: &[u8], width: u16, height: u16, filter: png::Filter) -> Vec<u8> {
         let mut output = Vec::new();
         let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_deflate_compression(png::DeflateCompression::Level(level));
+        encoder.set_deflate_compression(png::DeflateCompression::Level(1));
         encoder.set_filter(filter);
         let mut writer = encoder.write_header().unwrap();
         writer.write_image_data(rgb).unwrap();
         writer.finish().unwrap();
         output
-    }
-
-    #[test]
-    fn no_filter_level_two_reference_is_smaller_than_level_one() {
-        for (width, height) in [(1024_u16, 768_u16), (511_u16, 383_u16)] {
-            let rgb = representative_browser_rgb(width, height);
-            let level_one = encode_reference_png(&rgb, width, height, png::Filter::NoFilter, 1);
-            let level_two = encode_reference_png(&rgb, width, height, png::Filter::NoFilter, 2);
-            assert!(
-                level_two.len() < level_one.len(),
-                "Level2 NoFilter payload {} is not below Level1 {} for {width}x{height}",
-                level_two.len(),
-                level_one.len()
-            );
-        }
     }
 }
