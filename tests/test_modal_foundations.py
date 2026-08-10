@@ -74,9 +74,11 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
             assert remote_path == "/opt/modal-computer-use/native/x11_shm"
             assert copy is True
             assert "target/**" in ignore
+            self.calls.append(("add_local_dir", (remote_path, copy, ignore)))
             return self
 
         def run_commands(self, *_commands: str) -> FakeImage:
+            self.calls.append(("run_commands", _commands))
             return self
 
         def env(self, environment: dict[str, str]) -> FakeImage:
@@ -494,6 +496,9 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
     assert [name for name, _value in calls] == [
         "apt_install",
         "uv_sync",
+        "apt_install",
+        "add_local_dir",
+        "run_commands",
         "env",
         "add_local_python_source",
     ]
@@ -524,6 +529,22 @@ def test_standard_inline_and_managed_recipes_share_runtime_layers(
             uv_version: str,
         ) -> FakeRecipe:
             self.uv = (uv_project_dir, frozen, uv_version)
+            return self
+
+        def add_local_dir(
+            self,
+            _local_path: str,
+            *,
+            remote_path: str,
+            copy: bool,
+            ignore: tuple[str, ...],
+        ) -> FakeRecipe:
+            assert remote_path == "/opt/modal-computer-use/native/x11_shm"
+            assert copy is True
+            assert "target/**" in ignore
+            return self
+
+        def run_commands(self, *_commands: str) -> FakeRecipe:
             return self
 
         def env(self, values: dict[str, str]) -> FakeRecipe:

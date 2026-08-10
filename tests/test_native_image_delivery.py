@@ -38,6 +38,16 @@ class _FakeImage:
         self.calls.append(("pip_install_from_pyproject", path))
         return self
 
+    def uv_sync(
+        self,
+        uv_project_dir: str,
+        *,
+        frozen: bool,
+        uv_version: str,
+    ) -> _FakeImage:
+        self.calls.append(("uv_sync", (uv_project_dir, frozen, uv_version)))
+        return self
+
     def env(self, values: dict[str, str]) -> _FakeImage:
         self.calls.append(("env", values))
         return self
@@ -121,7 +131,7 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "import _modal_computer_use_x11_shm" in joined
     assert "/opt/modal-computer-use/native/x11_shm/canary.py" in joined
     assert any(
-        name == "add_local_python_source" and value == ("modal_computer_use", True)
+        name == "add_local_python_source" and value == ("modal_computer_use", False)
         for name, value in image.calls
     )
 
