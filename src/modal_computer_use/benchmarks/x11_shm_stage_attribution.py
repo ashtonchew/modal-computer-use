@@ -9,6 +9,7 @@ import importlib
 import json
 import math
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from time import perf_counter_ns
@@ -47,6 +48,46 @@ EXPECTED_MODULE_IDENTITY = {
     "codec_runtime": "in-process-miniz_oxide",
     "codec_library": "in-process",
 }
+_STAGE_FAILURE_PHASES = frozenset(
+    {
+        "workload_contract",
+        "cgroup_directory",
+        "cpu_limit",
+        "native_import",
+        "module_identity",
+        "session_start",
+        "worker_identity",
+        "worker_cgroup",
+        "cgroup_before",
+        "warmup_full_capture",
+        "warmup_region_capture",
+        "measured_full_capture",
+        "measured_region_capture",
+        "frame_stability",
+        "request_cgroup",
+        "worker_identity_after",
+        "session_close",
+        "cgroup_after",
+        "summary",
+        "unknown",
+    }
+)
+
+
+class _StageProgress:
+    def __init__(self) -> None:
+        self.phase = "workload_contract"
+
+
+class _StageAttributionFailure(RuntimeError):
+    def __init__(self, phase: str, failure_type: str) -> None:
+        self.safe_phase = phase if phase in _STAGE_FAILURE_PHASES else "unknown"
+        self.safe_failure_type = (
+            failure_type
+            if failure_type.isidentifier() and len(failure_type) <= 64
+            else "RuntimeError"
+        )
+        super().__init__("stage attribution diagnostic failed")
 
 
 def _finite_nonnegative(value: object, label: str) -> float:
@@ -245,31 +286,41 @@ async def _capture_once(
     )
 
 
-async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
+async def _run_child_inner(
+    *, captures: int, warmups: int, progress: _StageProgress
+) -> dict[str, Any]:
     if captures != CAPTURES or warmups != WARMUPS:
         raise ValueError("stage diagnostic workload is fixed")
+    progress.phase = "cgroup_directory"
     directory = _cgroup_directory()
+    progress.phase = "cpu_limit"
     cpu_limit = _cpu_max(directory)
+    progress.phase = "native_import"
     native = importlib.import_module("_modal_computer_use_x11_shm")
+    progress.phase = "module_identity"
     module_identity = {
         key: getattr(native, key, None) for key in EXPECTED_MODULE_IDENTITY
     }
     if module_identity != EXPECTED_MODULE_IDENTITY:
         raise RuntimeError("native module identity differs from the fixed diagnostic")
+    progress.phase = "session_start"
     session = X11SharedMemoryScreenshotSession(
         display=os.environ.get("DISPLAY", ":99"), width=1024, height=768
     )
+    progress.phase = "worker_identity"
     owner = session._session
     process = getattr(owner, "_process", None)
     if process is None or not isinstance(process.pid, int):
         raise RuntimeError("timed worker identity is unavailable")
     worker_before = _process_identity(process.pid)
+    progress.phase = "worker_cgroup"
     worker_cgroup_same = _unified_cgroup_path(process.pid) == _unified_cgroup_path()
     if not worker_cgroup_same:
         raise RuntimeError("timed worker does not share the diagnostic cgroup")
     rows: list[dict[str, Any]] = []
     lane_hashes: dict[str, bytes] = {}
     payload_sizes: dict[str, list[int]] = {"full": [], "region": []}
+    progress.phase = "cgroup_before"
     cgroup_before = _cpu_stat(directory)
     worker_after = None
     try:
@@ -277,7 +328,12 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
             lane = "full" if index % 2 == 0 else "region"
             geometry = (0, 0, 1024, 768) if lane == "full" else (7, 9, 511, 383)
             measured = index >= warmups
+            if measured:
+                progress.phase = "request_cgroup"
             cpu_before_request = _cpu_stat(directory) if measured else None
+            progress.phase = (
+                f"measured_{lane}_capture" if measured else f"warmup_{lane}_capture"
+            )
             data, stages = await _capture_once(
                 session,
                 x=geometry[0],
@@ -285,7 +341,10 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
                 width=geometry[2],
                 height=geometry[3],
             )
+            if measured:
+                progress.phase = "request_cgroup"
             cpu_after_request = _cpu_stat(directory) if measured else None
+            progress.phase = "frame_stability"
             digest = hashlib.sha256(data).digest()
             expected_digest = lane_hashes.setdefault(lane, digest)
             if digest != expected_digest:
@@ -294,6 +353,7 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
                 continue
             if cpu_before_request is None or cpu_after_request is None:
                 raise RuntimeError("per-request cgroup evidence is unavailable")
+            progress.phase = "request_cgroup"
             cgroup_delta = {
                 field: cpu_after_request[field] - cpu_before_request[field]
                 for field in CGROUP_FIELDS
@@ -309,17 +369,31 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
                 }
             )
             payload_sizes[lane].append(len(data))
+        progress.phase = "worker_identity_after"
         worker_after = _process_identity(worker_before["pid"])
     finally:
-        session.close()
+        previous_phase = progress.phase
+        primary_failure_active = sys.exc_info()[0] is not None
+        try:
+            session.close()
+        except Exception:
+            if primary_failure_active:
+                progress.phase = previous_phase
+            else:
+                progress.phase = "session_close"
+                raise
+        else:
+            progress.phase = previous_phase
     if worker_after is None:
         raise RuntimeError("terminal timed worker identity is unavailable")
+    progress.phase = "cgroup_after"
     cgroup_after = _cpu_stat(directory)
     cgroup_delta = {
         field: cgroup_after[field] - cgroup_before[field] for field in CGROUP_FIELDS
     }
     if any(value < 0 for value in cgroup_delta.values()):
         raise RuntimeError("aggregate cgroup counters regressed")
+    progress.phase = "summary"
     tail_schedule = [
         {
             "schedule_index": row["schedule_index"],
@@ -367,18 +441,30 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
     }
 
 
+async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
+    progress = _StageProgress()
+    try:
+        return await _run_child_inner(
+            captures=captures,
+            warmups=warmups,
+            progress=progress,
+        )
+    except Exception as exc:
+        raise _StageAttributionFailure(progress.phase, type(exc).__name__) from None
+
+
 def run_child(*, captures: int = CAPTURES, warmups: int = WARMUPS) -> dict[str, Any]:
     try:
         return asyncio.run(_run_child(captures=captures, warmups=warmups))
-    except Exception as exc:
+    except _StageAttributionFailure as exc:
         return {
             "passed": False,
             "warmups_completed": 0,
             "captures_completed": 0,
             "full_captures": 0,
             "region_captures": 0,
-            "failure_type": type(exc).__name__,
-            "failure_phase": "stage_capture",
+            "failure_type": exc.safe_failure_type,
+            "failure_phase": exc.safe_phase,
         }
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from modal_computer_use.benchmarks import x11_shm_stage_attribution as stage
 from modal_computer_use.daemon.desktop.screenshot_capture import (
     NativeCaptureTiming,
@@ -107,6 +109,63 @@ def test_stage_row_preserves_nested_timing_algebra() -> None:
     assert row["native_residual_ms"] == 6 / 1_000_000
     assert row["parent_outside_io_ms"] == 17 / 1_000_000
     assert row["controller_boundary_residual_ms"] == 20 / 1_000_000
+
+
+def test_stage_child_retains_safe_preflight_failure_phase(monkeypatch) -> None:
+    def fail_cgroup_directory() -> None:
+        raise RuntimeError("private target detail")
+
+    monkeypatch.setattr(stage, "_cgroup_directory", fail_cgroup_directory)
+
+    result = stage.run_child()
+
+    assert result["passed"] is False
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "cgroup_directory"
+
+
+def test_stage_child_retains_first_capture_failure_phase(monkeypatch) -> None:
+    class FakeSession:
+        _session = SimpleNamespace(_process=SimpleNamespace(pid=42))
+
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def close(self) -> None:
+            raise RuntimeError("private close detail")
+
+    async def fail_capture(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("private capture detail")
+
+    monkeypatch.setattr(stage, "_cgroup_directory", lambda: None)
+    monkeypatch.setattr(
+        stage,
+        "_cpu_max",
+        lambda _: {"quota_usec": 100_000, "period_usec": 100_000},
+    )
+    monkeypatch.setattr(
+        stage.importlib,
+        "import_module",
+        lambda _: SimpleNamespace(**stage.EXPECTED_MODULE_IDENTITY),
+    )
+    monkeypatch.setattr(stage, "X11SharedMemoryScreenshotSession", FakeSession)
+    monkeypatch.setattr(
+        stage,
+        "_process_identity",
+        lambda _: {"pid": 42, "starttime_ticks": 7},
+    )
+    monkeypatch.setattr(stage, "_unified_cgroup_path", lambda *args: "/same")
+    monkeypatch.setattr(
+        stage,
+        "_cpu_stat",
+        lambda _: {field: 0 for field in stage.CGROUP_FIELDS},
+    )
+    monkeypatch.setattr(stage, "_capture_once", fail_capture)
+
+    result = stage.run_child()
+
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "warmup_full_capture"
 
 
 def test_complete_stage_artifact_requires_fixed_safe_contract() -> None:
