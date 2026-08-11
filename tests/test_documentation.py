@@ -263,7 +263,7 @@ def test_release_docs_identify_v2_release_candidate() -> None:
 
     assert "git@v1.1.0" not in readme
     assert "## Unreleased" in changelog
-    assert "## 2.0.0 - 2026-08-08" in changelog
+    assert "## 2.0.0 - 2026-08-10" in changelog
     assert "active specification for the `2.0.0` release candidate" in specification
     assert "**Previous released baseline:** `v1.1.0`" in specification
     assert "**Release identity:** `v2.0.0`" in specification

@@ -17,12 +17,12 @@ def test_v2_release_identity_is_coherent() -> None:
     assert project["project"]["version"] == "2.0.0"
     assert '__version__ = "2.0.0"' in runtime
     assert openapi["info"]["version"] == "2.0.0"
-    assert "## 2.0.0 - 2026-08-08" in changelog
+    assert "## 2.0.0 - 2026-08-10" in changelog
 
 
 def test_v2_changelog_contains_the_exact_migration_contract() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    release = changelog.split("## 2.0.0 - 2026-08-08", maxsplit=1)[1].split(
+    release = changelog.split("## 2.0.0 - 2026-08-10", maxsplit=1)[1].split(
         "## 1.1.0", maxsplit=1
     )[0]
 

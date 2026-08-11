@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-08-10
+
 - Replaced the daemon's abrupt 20-action rolling window with a daemon-local token bucket. The
   default refills 100 normalized input-work tokens per second and permits a 400-token burst.
   Action arrays reserve their complete recursive cost before mutation, so rate limiting cannot
@@ -11,8 +13,6 @@
 - Added an opt-in `x11-shm` screenshot source and matched promotion harness for complete lossless
   PNG capture. The preregistered Modal campaign failed readiness-latency and X-server-restart
   gates, so persistent MSS remains the production default and no faster-default claim is made.
-
-## 2.0.0 - 2026-08-08
 
 - Made the primary SDK path an async, explicitly placed Modal trajectory: one owner creates the
   desktop, passes a versioned session handle to an application-owned Modal Function, and the
