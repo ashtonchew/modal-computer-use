@@ -26,18 +26,37 @@ from modal_computer_use.benchmarks import (
 )
 
 
+def _base_runner_paths(
+    script_path: Path = Path(__file__),
+    scripts_mount: Path = Path("/scripts"),
+) -> tuple[Path, ...]:
+    filename = "x11_shm_direct_vs_spawned_runner.py"
+    parent = script_path.resolve().parent
+    candidates = (
+        parent / filename,
+        parent / "scripts" / "benchmarks" / filename,
+        scripts_mount / "benchmarks" / filename,
+    )
+    return tuple(dict.fromkeys(candidates))
+
+
 def _load_base_runner() -> Any:
     try:
         return importlib.import_module("x11_shm_direct_vs_spawned_runner")
-    except ModuleNotFoundError:
-        path = Path(__file__).resolve().with_name("x11_shm_direct_vs_spawned_runner.py")
+    except ModuleNotFoundError as exc:
+        if exc.name != "x11_shm_direct_vs_spawned_runner":
+            raise
+    for path in _base_runner_paths():
+        if not path.is_file():
+            continue
         spec = importlib.util.spec_from_file_location("x11_shm_direct_vs_spawned_runner", path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("base X11-SHM runner is unavailable") from None
+            continue
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return module
+    raise RuntimeError("base X11-SHM runner is unavailable")
 
 
 base_runner = _load_base_runner()
