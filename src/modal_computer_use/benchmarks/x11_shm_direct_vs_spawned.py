@@ -25,7 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from statistics import median
 from time import perf_counter_ns
 from typing import Any, Literal, cast
@@ -71,6 +71,9 @@ SAFE_FAILURE_PHASES = frozenset(
         "workload_contract",
         "native_import",
         "module_identity",
+        "target_module_hash",
+        "target_image_identity",
+        "target_cgroup_limits",
         "direct_session_start",
         "spawned_session_start",
         "warmup_capture",
@@ -516,6 +519,84 @@ def _validate_cleanup(value: object, label: str) -> dict[str, Any]:
     return {"succeeded": value["succeeded"], "error_types": error_types}
 
 
+def _validate_rejected_envelope(observation: Mapping[str, Any]) -> dict[str, Any]:
+    required = {
+        "passed",
+        *SCOPE_CONTRACT,
+        "warmups_completed",
+        "captures_completed",
+        "paired_prefix_samples",
+        "unpaired_after_failure_samples",
+        "first_unpaired_pair",
+        "pixel_hash_parity",
+        "arms",
+        "retries",
+        "replacement_samples",
+        "failure_type",
+        "failure_phase",
+    }
+    allowed = required | {"failure_timeout_origin"}
+    if set(observation) not in {frozenset(required), frozenset(allowed)}:
+        raise ValueError("invalid rejected observation envelope")
+    if observation.get("passed") is not False or observation.get("arms") != {}:
+        raise ValueError("invalid rejected observation state")
+    retained: dict[str, Any] = {"passed": False, "arms": {}}
+    for key, expected in SCOPE_CONTRACT.items():
+        if observation.get(key) != expected:
+            raise ValueError(f"scope contract differs for {key}")
+        retained[key] = expected
+    for key in ("warmups_completed", "captures_completed"):
+        counts = observation.get(key)
+        if not isinstance(counts, Mapping) or set(counts) != set(ARMS):
+            raise ValueError(f"invalid rejected {key}")
+        retained[key] = {
+            arm: _bounded_count(
+                counts[arm],
+                f"{key}.{arm}",
+                maximum=WARMUPS if key == "warmups_completed" else PAIRS,
+            )
+            for arm in ARMS
+        }
+    retained["paired_prefix_samples"] = _bounded_count(
+        observation.get("paired_prefix_samples"), "paired prefix", maximum=PAIRS
+    )
+    retained["unpaired_after_failure_samples"] = _bounded_count(
+        observation.get("unpaired_after_failure_samples"),
+        "unpaired samples",
+        maximum=2 * PAIRS,
+    )
+    first_unpaired = observation.get("first_unpaired_pair")
+    retained["first_unpaired_pair"] = (
+        None
+        if first_unpaired is None
+        else _bounded_count(first_unpaired, "first unpaired pair", maximum=PAIRS - 1)
+    )
+    if observation.get("pixel_hash_parity") is not False:
+        raise ValueError("rejected envelope cannot claim pixel parity")
+    retained["pixel_hash_parity"] = False
+    retained["retries"] = _bounded_count(observation.get("retries"), "retries", maximum=0)
+    retained["replacement_samples"] = _bounded_count(
+        observation.get("replacement_samples"), "replacement samples", maximum=0
+    )
+    failure_type = _safe_label(observation.get("failure_type"), allowed=SAFE_ARM_FAILURE_TYPES)
+    failure_phase = _safe_label(observation.get("failure_phase"), allowed=SAFE_FAILURE_PHASES)
+    if failure_type is None or failure_phase is None:
+        raise ValueError("invalid rejected failure classification")
+    origin = observation.get("failure_timeout_origin")
+    if origin is not None and origin not in SAFE_TIMEOUT_ORIGINS:
+        raise ValueError("invalid rejected timeout origin")
+    if origin is not None and failure_type not in {
+        "X11ScreenshotTimeoutError",
+        "ScreenshotCaptureTimedOut",
+        "TimeoutError",
+    }:
+        raise ValueError("non-timeout rejected envelope retained timeout origin")
+    retained["failure_type"] = failure_type
+    retained["failure_phase"] = failure_phase
+    retained["failure_timeout_origin"] = origin
+    return retained
+
+
 def _timing_to_row(
     sample: _CaptureSample, *, pair_index: int, sequence: int, position: int, arm: str
 ) -> dict[str, Any]:
@@ -724,22 +805,38 @@ def _module_identity(native: Any) -> dict[str, str]:
     return _validate_module_identity(identity)
 
 
+def _v2_cgroup_directory(
+    membership_text: str | None = None,
+    *,
+    root: Path = Path("/sys/fs/cgroup"),
+) -> Path:
+    if membership_text is None:
+        membership_text = Path("/proc/self/cgroup").read_text(encoding="utf-8")
+    memberships = membership_text.splitlines()
+    paths = []
+    for line in memberships:
+        parts = line.split(":", 2)
+        if len(parts) == 3 and parts[1] == "":
+            paths.append(parts[2])
+    if len(paths) != 1 or not paths[0].startswith("/"):
+        raise RuntimeError("target cgroup v2 membership is unavailable")
+    relative = PurePosixPath(paths[0])
+    if ".." in relative.parts:
+        raise RuntimeError("target cgroup v2 membership is unsafe")
+    # /proc/self/cgroup is the kernel's authoritative membership path in this
+    # process's cgroup namespace.  Resolve it under that namespace's mount.
+    return root / paths[0].lstrip("/")
+
+
 def _runtime_limits() -> tuple[int, int, int]:
     """Read the exact one-CPU/2-GiB limits applied to this child."""
 
-    # Resolve the process's namespaced cgroup directory first; reading the
-    # mount root can silently report the host/container parent instead.
-    from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
-        _cgroup_source,
-        _cpu_max,
-    )
-
-    source = _cgroup_source()
-    if source.version != "v2":
-        raise RuntimeError("direct/spawned diagnostic requires cgroup v2")
-    limits = _cpu_max(source)
-    cpu_quota, cpu_period = limits["quota_usec"], limits["period_usec"]
-    memory_path = source.directory / "memory.max"
+    directory = _v2_cgroup_directory()
+    quota_text, period_text = (directory / "cpu.max").read_text(encoding="utf-8").split()
+    if quota_text == "max":
+        raise RuntimeError("target CPU limit is unbounded")
+    cpu_quota, cpu_period = int(quota_text), int(period_text)
+    memory_path = directory / "memory.max"
     memory_text = memory_path.read_text(encoding="utf-8").strip()
     if memory_text is None or memory_text in {"max", "-1"}:
         raise RuntimeError("target memory limit is unavailable")
@@ -749,14 +846,25 @@ def _runtime_limits() -> tuple[int, int, int]:
     return cpu_quota, cpu_period, memory_bytes
 
 
-def _target_identity(native: Any, *, display: str) -> dict[str, Any]:
+def _target_identity(
+    native: Any,
+    *,
+    display: str,
+    progress: _Progress | None = None,
+) -> dict[str, Any]:
+    if progress is not None:
+        progress.phase = "target_module_hash"
     module_path = getattr(native, "__file__", None)
     if not isinstance(module_path, str):
         raise RuntimeError("native module path is unavailable")
     module_sha = hashlib.sha256(Path(module_path).read_bytes()).hexdigest()
+    if progress is not None:
+        progress.phase = "target_image_identity"
     image_id = os.environ.get("MODAL_IMAGE_ID")
     if not isinstance(image_id, str) or not image_id.startswith("im-"):
         raise RuntimeError("target image identity is unavailable")
+    if progress is not None:
+        progress.phase = "target_cgroup_limits"
     quota_usec, period_usec, memory_bytes = _runtime_limits()
     return {
         **_module_identity(native),
@@ -895,7 +1003,7 @@ async def _run_child_inner(
     native = importlib.import_module(MODULE_NAME)
     progress.phase = "module_identity"
     module_identity = _module_identity(native)
-    target_identity = _target_identity(native, display=display)
+    target_identity = _target_identity(native, display=display, progress=progress)
     sessions: dict[str, Any] = {}
     identities_before: dict[str, dict[str, int]] = {}
     failures: dict[str, dict[str, Any] | None] = {arm: None for arm in ARMS}
@@ -1338,7 +1446,10 @@ def build_artifact(
     try:
         retained = _validate_observation(observation)
     except (TypeError, ValueError, OverflowError):
-        validation_failed = True
+        try:
+            retained = _validate_rejected_envelope(observation)
+        except (TypeError, ValueError, OverflowError):
+            validation_failed = True
     try:
         retained_provenance = _validate_provenance(provenance)
     except (TypeError, ValueError):
@@ -1377,12 +1488,16 @@ def build_artifact(
         arm_failures = [
             retained["arms"][arm]["failure"]
             for arm in ARMS
-            if retained["arms"][arm]["failure"] is not None
+            if arm in retained["arms"] and retained["arms"][arm]["failure"] is not None
         ]
         cleanup_only = (
             not cleanup_ok
-            or not retained["session_cleanup"]["succeeded"]
-            or any(not retained["arms"][arm]["session_cleanup"]["succeeded"] for arm in ARMS)
+            or ("session_cleanup" in retained and not retained["session_cleanup"]["succeeded"])
+            or any(
+                arm in retained["arms"]
+                and not retained["arms"][arm]["session_cleanup"]["succeeded"]
+                for arm in ARMS
+            )
         ) and not arm_failures
         if failure_type is None:
             if arm_failures:
@@ -1448,7 +1563,8 @@ def build_artifact(
             if validation_failed
             else None
             if passed
-            else _safe_label(
+            else retained.get("failure_phase")
+            or _safe_label(
                 observation.get("failure_phase"),
                 allowed=SAFE_FAILURE_PHASES,
             )
