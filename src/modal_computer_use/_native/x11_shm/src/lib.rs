@@ -392,8 +392,42 @@ impl RgbPngEncoder {
         {
             convert_bgra_row(source_row, destination_row);
         }
-
         encode_rgb_buffer(&self.rgb, width, height)
+    }
+
+    fn encode_timed(
+        &mut self,
+        slot: &SharedMemorySlot,
+        width: u16,
+        height: u16,
+        stride: usize,
+    ) -> Result<(Vec<u8>, u64, u64)> {
+        let rgb_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .ok_or_else(|| anyhow!("RGB buffer size overflows usize"))?;
+        let frame_len = stride
+            .checked_mul(height as usize)
+            .ok_or_else(|| anyhow!("XImage buffer size overflows usize"))?;
+        let source = slot.bytes(frame_len)?;
+        if stride < (width as usize).saturating_mul(4) {
+            bail!("XImage stride is narrower than the requested row");
+        }
+        if self.rgb.len() != rgb_len {
+            self.rgb.resize(rgb_len, 0);
+        }
+        let conversion_started = Instant::now();
+        for (source_row, destination_row) in source
+            .chunks_exact(stride)
+            .zip(self.rgb.chunks_exact_mut(width as usize * 3))
+        {
+            convert_bgra_row(source_row, destination_row);
+        }
+        let rgb_convert_ns = elapsed_ns(conversion_started);
+        let encode_started = Instant::now();
+        let output = encode_rgb_buffer(&self.rgb, width, height)?;
+        let png_encode_ns = elapsed_ns(encode_started);
+        Ok((output, rgb_convert_ns, png_encode_ns))
     }
 }
 
@@ -403,6 +437,36 @@ fn convert_bgra_row(source: &[u8], destination: &mut [u8]) {
         destination[1] = source[1];
         destination[2] = source[0];
     }
+}
+
+fn validate_capture_stage_timing(
+    x11_reply_ns: u64,
+    rgb_convert_ns: u64,
+    png_encode_ns: u64,
+    native_total_ns: u64,
+) -> Result<()> {
+    let component_total = x11_reply_ns
+        .checked_add(rgb_convert_ns)
+        .and_then(|value| value.checked_add(png_encode_ns))
+        .ok_or_else(|| anyhow!("native capture timing components overflow u64"))?;
+    if component_total > native_total_ns {
+        bail!("native capture timing components exceed total");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug)]
+struct NativeCaptureTiming {
+    x11_reply_ns: u64,
+    rgb_convert_ns: u64,
+    png_encode_ns: u64,
+    native_total_ns: u64,
 }
 
 #[cfg(target_os = "linux")]
@@ -728,6 +792,70 @@ impl X11SharedMemoryScreenshotSession {
         self.encoder.encode(slot, rect.width, rect.height, stride)
     }
 
+    fn capture_region_timed(&mut self, rect: Rect) -> Result<(Vec<u8>, NativeCaptureTiming)> {
+        let native_started = Instant::now();
+        let stride = row_stride(
+            rect.width,
+            self.format.bits_per_pixel,
+            self.format.scanline_pad,
+        )?;
+        let len = stride
+            .checked_mul(rect.height as usize)
+            .ok_or_else(|| anyhow!("capture region size overflows usize"))?;
+        if len > self.slot_len {
+            bail!("capture region is larger than the XShm slot");
+        }
+        let slot = self.slot.as_ref().ok_or_else(|| {
+            anyhow!("X11 shared-memory screenshot session has no shared-memory slot")
+        })?;
+        let x11_started = Instant::now();
+        let cookie = self.conn.send_request(&shm::GetImage {
+            drawable: x::Drawable::Window(self.root),
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            plane_mask: u32::MAX,
+            format: x::ImageFormat::ZPixmap as u8,
+            shmseg: slot.shmseg,
+            offset: 0,
+        });
+        let reply = match poll_reply_bounded(&self.conn, &cookie, "XShm GetImage") {
+            Ok(reply) => reply,
+            Err(error) => {
+                self.connection_failed = true;
+                return Err(error);
+            }
+        };
+        let x11_reply_ns = elapsed_ns(x11_started);
+        if reply.depth() != self.format.depth || reply.visual() != self.root_visual {
+            bail!("XShm reply visual or depth differs from the validated root");
+        }
+        let server_len = reply.size() as usize;
+        if server_len < len || server_len > slot.len {
+            bail!("XShm reply size does not match the validated slot");
+        }
+        let (output, rgb_convert_ns, png_encode_ns) =
+            self.encoder
+                .encode_timed(slot, rect.width, rect.height, stride)?;
+        let native_total_ns = elapsed_ns(native_started);
+        validate_capture_stage_timing(
+            x11_reply_ns,
+            rgb_convert_ns,
+            png_encode_ns,
+            native_total_ns,
+        )?;
+        Ok((
+            output,
+            NativeCaptureTiming {
+                x11_reply_ns,
+                rgb_convert_ns,
+                png_encode_ns,
+                native_total_ns,
+            },
+        ))
+    }
+
     fn capture_png_bytes(
         &mut self,
         x: i32,
@@ -740,6 +868,20 @@ impl X11SharedMemoryScreenshotSession {
         }
         let rect = validate_rect(self.width, self.height, x, y, width, height)?;
         self.capture_region(rect)
+    }
+
+    fn capture_png_bytes_timed(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: usize,
+        height: usize,
+    ) -> Result<(Vec<u8>, NativeCaptureTiming)> {
+        if self.closed {
+            bail!("X11 shared-memory screenshot session is closed");
+        }
+        let rect = validate_rect(self.width, self.height, x, y, width, height)?;
+        self.capture_region_timed(rect)
     }
 
     fn close_inner(&mut self) -> Result<()> {
@@ -926,6 +1068,42 @@ impl X11SharedMemoryScreenshotSession {
         Ok(PyBytes::new(py, &output))
     }
 
+    /// Capture through the private, benchmark-only stage timing seam.
+    #[pyo3(signature = (x=0, y=0, width=None, height=None))]
+    fn capture_png_timed<'py>(
+        &mut self,
+        py: Python<'py>,
+        x: i32,
+        y: i32,
+        width: Option<usize>,
+        height: Option<usize>,
+    ) -> PyResult<(Bound<'py, PyBytes>, (u64, u64, u64, u64))> {
+        let width = width.unwrap_or(self.width as usize);
+        let height = height.unwrap_or(self.height as usize);
+        let (output, timing) =
+            self.capture_png_bytes_timed(x, y, width, height)
+                .map_err(|error| {
+                    if is_reply_timeout(&error) {
+                        X11ScreenshotTimeoutError::new_err(format!(
+                            "X11 shared-memory screenshot timed out: {error:#}"
+                        ))
+                    } else {
+                        PyValueError::new_err(format!(
+                            "X11 shared-memory screenshot failed: {error:#}"
+                        ))
+                    }
+                })?;
+        Ok((
+            PyBytes::new(py, &output),
+            (
+                timing.x11_reply_ns,
+                timing.rgb_convert_ns,
+                timing.png_encode_ns,
+                timing.native_total_ns,
+            ),
+        ))
+    }
+
     fn dimensions(&self) -> (usize, usize) {
         (self.width as usize, self.height as usize)
     }
@@ -967,6 +1145,12 @@ mod tests {
     use std::io::Cursor;
     #[cfg(target_os = "linux")]
     use xcb::Xid;
+
+    #[test]
+    fn native_capture_stage_algebra_rejects_components_above_total() {
+        assert!(validate_capture_stage_timing(11, 13, 17, 47).is_ok());
+        assert!(validate_capture_stage_timing(11, 13, 17, 40).is_err());
+    }
 
     #[test]
     fn rectangle_validation_accepts_full_and_region() {
@@ -1268,6 +1452,10 @@ mod tests {
         });
         let mut scratch = RgbPngEncoder::default();
         let output = scratch.encode(&slot, 2, 1, 8).unwrap();
+        let mut timed_scratch = RgbPngEncoder::default();
+        let (timed_output, _rgb_convert_ns, _png_encode_ns) =
+            timed_scratch.encode_timed(&slot, 2, 1, 8).unwrap();
+        assert_eq!(timed_output, output);
         let decoder = png::Decoder::new(Cursor::new(output));
         let mut reader = decoder.read_info().unwrap();
         let mut decoded = vec![0_u8; reader.output_buffer_size().unwrap()];

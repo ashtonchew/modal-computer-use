@@ -21,12 +21,13 @@ import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter_ns
 from typing import Any, Literal, cast
 
 from ._x11_shm_worker import (
     CAPTURE_PAYLOAD,
     OP_CAPTURE,
+    OP_CAPTURE_TIMED,
     OP_CLOSE,
     PROTOCOL_MAGIC,
     REQUEST_HEADER,
@@ -37,6 +38,9 @@ from ._x11_shm_worker import (
     STATUS_READY,
     STATUS_TIMED_OUT,
     STATUS_UNAVAILABLE,
+    TIMING_HEADER,
+    TIMING_MAGIC,
+    TIMING_VERSION,
     max_png_payload,
 )
 
@@ -88,6 +92,23 @@ class ScreenshotCaptureResolution:
     requested: ScreenshotCaptureSource
     selected: ResolvedScreenshotCaptureSource
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NativeCaptureTiming:
+    """Private monotonic stage durations for the non-gating diagnostic."""
+
+    x11_reply_ns: int
+    rgb_convert_ns: int
+    png_encode_ns: int
+    native_total_ns: int
+    worker_dispatch_ns: int
+    worker_response_prep_ns: int
+    parent_lock_wait_ns: int
+    parent_send_ns: int
+    parent_header_wait_ns: int
+    parent_payload_read_ns: int
+    parent_total_ns: int
 
 
 _MODULE_NAME = "_modal_computer_use_x11_shm"
@@ -218,6 +239,47 @@ class X11SharedMemoryScreenshotSession:
                 "X11 shared-memory screenshot returned an invalid PNG"
             )
         return data
+
+    def capture_png_with_timing(
+        self, *, x: int, y: int, width: int, height: int
+    ) -> tuple[bytes, NativeCaptureTiming]:
+        """Capture through the private stage-attribution protocol."""
+
+        if self._closed:
+            raise ScreenshotCaptureFailed(
+                "X11 shared-memory screenshot session is closed"
+            )
+        capture = getattr(self._session, "capture_png_with_timing", None)
+        if not callable(capture):
+            raise ScreenshotCaptureUnavailable(
+                "X11 shared-memory screenshot timing diagnostic is unavailable"
+            )
+        try:
+            result = capture(x, y, width, height)
+        except ScreenshotCaptureTimedOut:
+            raise
+        except ScreenshotCaptureError:
+            raise
+        except Exception as exc:
+            if _is_native_timeout(exc, self._timeout_error):
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its reply deadline",
+                    timeout_origin="native_x11_reply_deadline",
+                ) from exc
+            raise ScreenshotCaptureFailed(
+                "X11 shared-memory screenshot timing diagnostic failed"
+            ) from exc
+        if (
+            not isinstance(result, tuple)
+            or len(result) != 2
+            or not isinstance(result[0], bytes)
+            or not isinstance(result[1], NativeCaptureTiming)
+            or not validate_png_dimensions(result[0], width=width, height=height)
+        ):
+            raise ScreenshotCaptureFailed(
+                "X11 shared-memory screenshot timing diagnostic returned invalid data"
+            )
+        return result
 
     def close(self) -> None:
         if self._closed:
@@ -354,6 +416,93 @@ class _SpawnedX11ScreenshotSession:
                 )
             return payload
 
+    def capture_png_with_timing(
+        self, x: int, y: int, width: int, height: int
+    ) -> tuple[bytes, NativeCaptureTiming]:
+        started_ns = perf_counter_ns()
+        lock_started_ns = started_ns
+        with self._lock:
+            acquired_ns = perf_counter_ns()
+            if self._closed:
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker is closed"
+                )
+            request_id = self._next_request_id()
+            deadline = monotonic() + _WORKER_OPERATION_TIMEOUT_SECONDS
+            try:
+                send_started_ns = perf_counter_ns()
+                self._send(
+                    OP_CAPTURE_TIMED,
+                    request_id,
+                    CAPTURE_PAYLOAD.pack(x, y, width, height),
+                    deadline,
+                )
+                sent_ns = perf_counter_ns()
+                (
+                    status,
+                    response_id,
+                    payload,
+                    header_wait_ns,
+                    payload_read_ns,
+                ) = self._receive_timed(deadline)
+            except TimeoutError as exc:
+                self._terminate()
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its process deadline",
+                    timeout_origin="worker_process_deadline",
+                ) from exc
+            except (OSError, ValueError, struct.error) as exc:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot timing diagnostic failed"
+                ) from exc
+            if response_id != request_id:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot worker returned an invalid response"
+                )
+            if status == STATUS_TIMED_OUT:
+                self._terminate()
+                raise ScreenshotCaptureTimedOut(
+                    "X11 shared-memory screenshot exceeded its reply deadline",
+                    timeout_origin="native_x11_reply_deadline",
+                )
+            if status != STATUS_CAPTURED or len(payload) <= TIMING_HEADER.size:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot timing diagnostic could not capture"
+                )
+            try:
+                data, stage_values = _decode_timing_payload(payload)
+            except ValueError as exc:
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot timing diagnostic returned invalid data"
+                ) from exc
+            x11_reply_ns, rgb_convert_ns, png_encode_ns, native_total_ns = (
+                stage_values[:4]
+            )
+            if not validate_png_dimensions(data, width=width, height=height):
+                self._terminate()
+                raise ScreenshotCaptureFailed(
+                    "X11 shared-memory screenshot timing diagnostic returned invalid data"
+                )
+            finished_ns = perf_counter_ns()
+            timing = NativeCaptureTiming(
+                x11_reply_ns=x11_reply_ns,
+                rgb_convert_ns=rgb_convert_ns,
+                png_encode_ns=png_encode_ns,
+                native_total_ns=native_total_ns,
+                worker_dispatch_ns=stage_values[4],
+                worker_response_prep_ns=stage_values[5],
+                parent_lock_wait_ns=acquired_ns - lock_started_ns,
+                parent_send_ns=sent_ns - send_started_ns,
+                parent_header_wait_ns=header_wait_ns,
+                parent_payload_read_ns=payload_read_ns,
+                parent_total_ns=finished_ns - started_ns,
+            )
+            return data, timing
+
     def close(self) -> None:
         with self._lock:
             if self._closed:
@@ -419,6 +568,33 @@ class _SpawnedX11ScreenshotSession:
             raise ValueError("unknown X11 screenshot worker status")
         return status, request_id, payload
 
+    def _receive_timed(self, deadline: float) -> tuple[int, int, bytes, int, int]:
+        header_started_ns = perf_counter_ns()
+        header = _recv_exact(self._socket, RESPONSE_HEADER.size, deadline)
+        header_finished_ns = perf_counter_ns()
+        magic, status, request_id, payload_length = RESPONSE_HEADER.unpack(header)
+        if magic != PROTOCOL_MAGIC or payload_length > self._payload_limit + TIMING_HEADER.size:
+            raise ValueError("invalid X11 screenshot worker timing response")
+        payload_started_ns = perf_counter_ns()
+        payload = _recv_exact(self._socket, payload_length, deadline)
+        payload_finished_ns = perf_counter_ns()
+        if status not in {
+            STATUS_READY,
+            STATUS_CAPTURED,
+            STATUS_CLOSED,
+            STATUS_UNAVAILABLE,
+            STATUS_TIMED_OUT,
+            STATUS_FAILED,
+        }:
+            raise ValueError("unknown X11 screenshot worker status")
+        return (
+            status,
+            request_id,
+            payload,
+            header_finished_ns - header_started_ns,
+            payload_finished_ns - payload_started_ns,
+        )
+
     def _terminate(self) -> None:
         if self._closed:
             return
@@ -439,6 +615,19 @@ class _SpawnedX11ScreenshotSession:
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
         process.wait()
+
+
+def _decode_timing_payload(payload: bytes) -> tuple[bytes, tuple[int, ...]]:
+    if len(payload) <= TIMING_HEADER.size:
+        raise ValueError("timed capture payload is truncated")
+    raw_timing = TIMING_HEADER.unpack(payload[: TIMING_HEADER.size])
+    if raw_timing[:2] != (TIMING_MAGIC, TIMING_VERSION):
+        raise ValueError("timed capture envelope is incompatible")
+    stage_values = raw_timing[2:]
+    x11_reply_ns, rgb_convert_ns, png_encode_ns, native_total_ns = stage_values[:4]
+    if native_total_ns < x11_reply_ns + rgb_convert_ns + png_encode_ns:
+        raise ValueError("timed capture stage algebra is invalid")
+    return payload[TIMING_HEADER.size :], stage_values
 
 
 def _remaining(deadline: float) -> float:

@@ -37,6 +37,7 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _run_x11_shm_daemon_local_tail_diagnostic,
     _run_x11_shm_scheduling_diagnostic,
     _run_x11_shm_soak,
+    _run_x11_shm_stage_attribution_diagnostic,
     _run_x11_shm_transport_threshold_diagnostic,
     _select_daemon_worker_pair,
     _validate_bounded_x_server_sample_count,
@@ -574,6 +575,79 @@ def test_scheduling_diagnostic_has_safe_remote_and_local_entrypoints() -> None:
     assert "def run_x11_shm_scheduling_diagnostic(" in runner
     assert "def x11_shm_scheduling_diagnostic_main(" in runner
     assert "run_x11_shm_scheduling_diagnostic.remote(" in runner
+
+
+def test_stage_attribution_runs_one_private_same_sandbox_child() -> None:
+    child_payload = {
+        "passed": False,
+        "warmups_completed": 20,
+        "captures_completed": 17,
+        "full_captures": 9,
+        "region_captures": 8,
+        "failure_type": "RuntimeError",
+        "failure_phase": "stage_capture",
+    }
+    target_identity = {
+        "backend": "x11-shm",
+        "codec": "png-deflate-level1-no-filter",
+        "module_sha256": "a" * 64,
+        "image_object_id": "im-test",
+        "cpu": 1.0,
+        "memory_bytes": 2048 * 1024**2,
+        "machine": "x86_64",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(child_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:3] == (
+                "python",
+                "-m",
+                "modal_computer_use.benchmarks.x11_shm_stage_attribution",
+            )
+            assert args[3:] == ("--captures", "1000", "--warmups", "20")
+            assert kwargs == {"timeout": 900}
+            return FakeProcess()
+
+    class FakeContext:
+        exited = False
+
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+        async def __aexit__(self, *args: object) -> None:
+            self.exited = True
+
+    context = FakeContext()
+    context.target_identity = target_identity
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: context)
+    )
+
+    assert result == {**child_payload, "target_identity": target_identity}
+    assert context.exited is True
+
+
+def test_stage_attribution_has_non_gating_remote_and_local_entrypoints() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_stage_attribution_diagnostic(" in runner
+    assert "def x11_shm_stage_attribution_main(" in runner
+    assert "run_x11_shm_stage_attribution_diagnostic.remote(" in runner
+    assert 'lambda: _ArmContext("mss")' in runner
 
 
 def test_x11_benchmark_bakes_daemon_source_for_nested_sandbox() -> None:

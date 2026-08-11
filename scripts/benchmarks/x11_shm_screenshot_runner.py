@@ -42,6 +42,15 @@ from modal_computer_use.benchmarks.x11_shm_screenshot import (
     evaluate_x11_shm_screenshot_promotion,
     validate_x11_shm_screenshot_artifact,
 )
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    CAPTURES as STAGE_ATTRIBUTION_CAPTURES,
+)
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    WARMUPS as STAGE_ATTRIBUTION_WARMUPS,
+)
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    build_artifact as build_stage_attribution_artifact,
+)
 from modal_computer_use.config import (
     ActionConfig,
     BrowserConfig,
@@ -4225,6 +4234,80 @@ async def _run_x11_shm_scheduling_diagnostic(
     }
 
 
+async def _run_x11_shm_stage_attribution_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+) -> dict[str, Any]:
+    if captures != STAGE_ATTRIBUTION_CAPTURES or warmups != STAGE_ATTRIBUTION_WARMUPS:
+        raise ValueError("stage attribution diagnostic workload is fixed")
+    context = factory()
+    computer: Any | None = None
+    phase = "context_enter"
+    observation: dict[str, Any] | None = None
+    try:
+        computer = await context.__aenter__()
+        phase = "sandbox_handle"
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for stage attribution")
+        phase = "private_stage_child"
+        process = await sandbox.exec.aio(
+            "python",
+            "-m",
+            "modal_computer_use.benchmarks.x11_shm_stage_attribution",
+            "--captures",
+            str(captures),
+            "--warmups",
+            str(warmups),
+            timeout=900,
+        )
+        exit_code = await process.wait.aio()
+        raw = await _process_stdout_text(process)
+        if exit_code != 0 or not raw:
+            raise RuntimeError("stage attribution child failed")
+        phase = "parse_child_output"
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("stage attribution child returned invalid output")
+        payload["target_identity"] = getattr(context, "target_identity", None)
+        observation = payload
+    except Exception as exc:
+        observation = {
+            "passed": False,
+            "warmups_completed": 0,
+            "captures_completed": 0,
+            "full_captures": 0,
+            "region_captures": 0,
+            "failure_type": type(exc).__name__,
+            "failure_phase": phase,
+        }
+    finally:
+        if computer is not None:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                if observation is None:
+                    observation = {}
+                observation.update(
+                    {
+                        "passed": False,
+                        "failure_type": type(exc).__name__,
+                        "failure_phase": "context_cleanup",
+                    }
+                )
+    return observation or {
+        "passed": False,
+        "warmups_completed": 0,
+        "captures_completed": 0,
+        "full_captures": 0,
+        "region_captures": 0,
+        "failure_type": "NoResult",
+        "failure_phase": phase,
+    }
+
+
 async def _run_x11_shm_daemon_local_tail_diagnostic(
     factory: Callable[[], AbstractAsyncContextManager[Any]],
     *,
@@ -5804,6 +5887,49 @@ def run_x11_shm_scheduling_diagnostic(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=1_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_stage_attribution_diagnostic(
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one same-Sandbox private source-stage diagnostic."""
+
+    if captures != STAGE_ATTRIBUTION_CAPTURES or warmups != STAGE_ATTRIBUTION_WARMUPS:
+        raise ValueError("stage attribution diagnostic workload is fixed")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            observation = await _run_x11_shm_stage_attribution_diagnostic(
+                lambda: _ArmContext("mss"),
+                captures=captures,
+                warmups=warmups,
+            )
+        except BaseException as exc:
+            observation = {
+                "passed": False,
+                "warmups_completed": 0,
+                "captures_completed": 0,
+                "full_captures": 0,
+                "region_captures": 0,
+                "failure_type": type(exc).__name__,
+                "failure_phase": "diagnostic",
+            }
+        cleanup = await _final_sandbox_cleanup()
+        return build_stage_attribution_artifact(observation, cleanup, provenance)
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -5950,6 +6076,29 @@ def x11_shm_scheduling_diagnostic_main(
         Path(output)
         if output
         else Path("benchmark-data/x11-shm-scheduling-diagnostic-1000.json")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_stage_attribution_main(
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+    output: str = "",
+) -> None:
+    path = (
+        Path(output)
+        if output
+        else Path("benchmark-data/x11-shm-stage-attribution-1000.json")
+    )
+    if path.exists():
+        raise FileExistsError("stage attribution output already exists")
+    result = run_x11_shm_stage_attribution_diagnostic.remote(
+        captures=captures,
+        warmups=warmups,
+        provenance=_local_provenance(),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
