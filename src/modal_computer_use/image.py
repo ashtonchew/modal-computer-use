@@ -451,19 +451,19 @@ def _add_x11_shared_memory_capture(
         f"chmod 0755 /tmp/rustup-init && /tmp/rustup-init -y --profile minimal "
         f"--default-toolchain {_RUST_TOOLCHAIN}",
         "export PATH=/root/.cargo/bin:$PATH && "
-        f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=/usr/local/bin/python3 "
+        f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=python "
         "cargo build "
         f"--locked --release --features {feature_args} "
         f"--manifest-path {cargo_manifest}",
-        "/usr/local/bin/python3 -c 'import pathlib, shutil, sysconfig; "
+        "python -c 'import pathlib, shutil, sysconfig; "
         f"source = pathlib.Path(\"{cargo_output}\"); assert source.is_file(); "
         f"destination = pathlib.Path(sysconfig.get_path(\"platlib\")) / "
         f"\"{_X11_SHARED_MEMORY_EXTENSION}.so\"; "
         "shutil.copy2(source, destination); destination.chmod(0o755)'",
-        f"/usr/local/bin/python3 {_X11_SHARED_MEMORY_REMOTE_PATH}/canary.py",
+        f"python {_X11_SHARED_MEMORY_REMOTE_PATH}/canary.py",
         f"rm -rf {_X11_SHARED_MEMORY_REMOTE_PATH}/target /root/.cargo/registry "
         "/root/.cargo/git /root/.rustup /root/.cargo/bin /tmp/rustup-init",
-        f"/usr/local/bin/python3 -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
+        f"python -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
         "assert hasattr(m, \"X11SharedMemoryScreenshotSession\"); "
         "assert issubclass(m.X11ScreenshotTimeoutError, RuntimeError)'",
     )

@@ -117,6 +117,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     image = default_image(profile=profile, browser=browser)
 
     assert isinstance(image, _FakeImage)
+    call_names = [name for name, _ in image.calls]
+    assert call_names.index("uv_sync") < call_names.index("run_commands")
     source_call = next(value for name, value in image.calls if name == "add_local_dir")
     local_path, remote_path, copy, ignore = source_call
     assert Path(local_path) == _native_screenshot_source()
@@ -131,6 +133,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "rustup" in joined
     assert "1.91.0" in joined
     assert "cargo build --locked --release --features extension-module" in joined
+    assert "PYO3_PYTHON=python" in joined
+    assert "/usr/local/bin/python3" not in joined
     assert "rustup target add" not in joined
     assert "/target/release/lib_modal_computer_use_x11_shm.so" in joined
     assert "_modal_computer_use_x11_shm.so" in joined
