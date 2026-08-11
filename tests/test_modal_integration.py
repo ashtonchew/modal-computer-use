@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import os
 import subprocess
 import sys
@@ -91,7 +92,7 @@ def test_modal_novnc_view_only_smoke() -> None:
     if os.getenv("MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE") != "1":
         pytest.skip("Set MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 to run noVNC smoke")
 
-    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use import ComputerConfig, ComputerSandbox, run_modal_daemon_command
     from modal_computer_use.config import RuntimeConfig
 
     computer = ComputerSandbox.create(
@@ -110,9 +111,14 @@ def test_modal_novnc_view_only_smoke() -> None:
         assert caps["vnc_enabled"] is True
         assert x11vnc.status == "running"
         assert novnc.status == "running"
-        command = computer.commands.run("pgrep", "-af", "x11vnc")
-        assert command.ok is True
-        argv = command.output["stdout"]
+        command = run_modal_daemon_command(
+            computer,
+            ("pgrep", "-af", "x11vnc"),
+            path="target-loopback",
+            exec_timeout_seconds=30,
+        )
+        assert command.returncode == 0, command.stderr
+        argv = command.stdout
         assert "-passwdfile" in argv
         assert "-nopw" not in argv
         assert "-viewonly" in argv
@@ -537,6 +543,7 @@ def test_modal_volume_artifact_sync_smoke() -> None:
 
     from modal_computer_use import ComputerConfig, ComputerSandbox
     from modal_computer_use.config import StorageConfig
+    from modal_computer_use.sandbox import modal_sandbox_exec_in_place
 
     suffix = uuid.uuid4().hex[:10]
     volume_name = f"mcu-v1-artifacts-{suffix}"
@@ -551,12 +558,16 @@ def test_modal_volume_artifact_sync_smoke() -> None:
     ).hydrate()
     computer = None
     reader = None
+    app = modal.App.lookup("modal-computer-use", create_if_missing=True)
 
     try:
-        reader = ComputerSandbox.create(
-            config=ComputerConfig(run_id=f"mcu-v1-volume-reader-{suffix}"),
+        reader = modal.Sandbox.create(
+            "sleep",
+            "300",
+            app=app,
             volumes={"/home/desktop/artifacts": volume},
             tags={"computer-use.smoke": "v1-volume-reader"},
+            timeout=300,
         )
         computer = ComputerSandbox.create(
             config=ComputerConfig(
@@ -573,7 +584,13 @@ def test_modal_volume_artifact_sync_smoke() -> None:
         assert sync.synced_paths == ["artifact-root"]
         assert "v2" in (sync.message or "")
         reader.reload_volumes(timeout=55)
-        assert reader.artifacts.read_bytes(proof_path) == proof
+        read_result = modal_sandbox_exec_in_place(
+            reader,
+            ("cat", f"/home/desktop/artifacts/{proof_path}"),
+            exec_timeout_seconds=30,
+        )
+        assert read_result.returncode == 0, read_result.stderr
+        assert read_result.stdout.encode() == proof
         computer.terminate()
         computer.detach()
         computer = None
@@ -583,9 +600,24 @@ def test_modal_volume_artifact_sync_smoke() -> None:
             computer.terminate()
             computer.detach()
         if reader is not None:
-            reader.terminate()
-            reader.detach()
+            reader.terminate(wait=True)
         modal.Volume.objects.delete(volume_name, allow_missing=True)
+
+
+def test_novnc_smoke_uses_owner_scope_for_privileged_process_check() -> None:
+    source = inspect.getsource(test_modal_novnc_view_only_smoke)
+
+    assert "run_modal_daemon_command" in source
+    assert 'path="target-loopback"' in source
+    assert "computer.commands.run" not in source
+
+
+def test_volume_smoke_uses_reader_without_desktop_open_files() -> None:
+    source = inspect.getsource(test_modal_volume_artifact_sync_smoke)
+
+    assert "reader = modal.Sandbox.create" in source
+    assert "reader.reload_volumes" in source
+    assert "reader = ComputerSandbox.create" not in source
 
 
 @pytest.mark.modal
