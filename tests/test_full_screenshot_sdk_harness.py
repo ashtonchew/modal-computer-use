@@ -650,6 +650,25 @@ def test_stage_attribution_has_non_gating_remote_and_local_entrypoints() -> None
     assert 'lambda: _ArmContext("mss")' in runner
 
 
+def test_stage_attribution_retains_safe_context_entry_subphase() -> None:
+    class FailedContext:
+        enter_phase = "runtime_identity"
+
+        async def __aenter__(self) -> None:
+            raise RuntimeError("private target detail")
+
+        async def __aexit__(self, *args: object) -> None:
+            raise AssertionError("context exit must not run after failed entry")
+
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: FailedContext())
+    )
+
+    assert result["passed"] is False
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "context_enter.runtime_identity"
+
+
 def test_x11_benchmark_bakes_daemon_source_for_nested_sandbox() -> None:
     runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
         encoding="utf-8"

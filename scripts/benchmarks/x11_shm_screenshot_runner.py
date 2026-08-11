@@ -4187,6 +4187,11 @@ async def _run_x11_shm_scheduling_diagnostic(
             raise RuntimeError("scheduling diagnostic returned invalid output")
         observation = payload
     except Exception as exc:
+        failure_phase = phase
+        if phase == "context_enter":
+            enter_phase = getattr(context, "enter_phase", None)
+            if isinstance(enter_phase, str) and enter_phase:
+                failure_phase = f"context_enter.{enter_phase}"
         observation = {
             "passed": False,
             "requested_source": "x11-shm",
@@ -4198,7 +4203,7 @@ async def _run_x11_shm_scheduling_diagnostic(
             "full_captures": 0,
             "region_captures": 0,
             "failure_type": type(exc).__name__,
-            "failure_phase": phase,
+            "failure_phase": failure_phase,
         }
     finally:
         if computer is not None:
@@ -4274,6 +4279,11 @@ async def _run_x11_shm_stage_attribution_diagnostic(
         payload["target_identity"] = getattr(context, "target_identity", None)
         observation = payload
     except Exception as exc:
+        failure_phase = phase
+        if phase == "context_enter":
+            enter_phase = getattr(context, "enter_phase", None)
+            if isinstance(enter_phase, str) and enter_phase:
+                failure_phase = f"context_enter.{enter_phase}"
         observation = {
             "passed": False,
             "warmups_completed": 0,
@@ -4281,7 +4291,7 @@ async def _run_x11_shm_stage_attribution_diagnostic(
             "full_captures": 0,
             "region_captures": 0,
             "failure_type": type(exc).__name__,
-            "failure_phase": phase,
+            "failure_phase": failure_phase,
         }
     finally:
         if computer is not None:
