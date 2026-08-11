@@ -644,6 +644,32 @@ This changes how long the benchmark desktop remains available, not the public sc
 or command methods inside the timer. The SDK's five-minute default expires during repeated
 1,000-character typing calls and leaves later command and verification rows on a dead session.
 
+### Measure action to immediate frame
+
+The External Provider Benchmark uses one click at `(512, 384)` followed by the next validated full
+screenshot. The timer starts before action dispatch and ends after the caller validates the image.
+Each external arm uses its public action and screenshot methods. Modal uses one `computer.step()`
+request from a placed application-owned Function.
+
+Run the external arms from a clean source revision:
+
+```bash
+uv run python scripts/run_external_action_frame_benchmark.py \
+  --authorize \
+  --env-file .env \
+  --iterations 100 \
+  --source-sha <full-source-sha> \
+  --output benchmark-results/candidates/external-action-frame.json \
+  --private-output benchmark-results/private/external-action-frame-private.json
+```
+
+The runner uses two warmups and one warm resource per provider. It rejects missing samples,
+retries, replacement samples, failed readbacks, and new surviving resources. Run
+`scripts/run_step_promotion.py` at the same source revision for the Modal arm. Build the tracked
+artifact with `computer-use benchmark action-frame-report`. The
+[2026-08-11 report](benchmark-results-2026-08-11-provider-action-frame.md) shows the current eligible
+result and its configuration limits.
+
 ## Reproduce the historical July 19 Modal optimization evidence
 
 [`modal-optimization-results-2026-07-19.json`](../benchmark-data/modal-optimization-results-2026-07-19.json)
@@ -665,6 +691,7 @@ Use these maintained workflows for new evidence:
 | Optimized lifecycle and warm operations | `computer-use benchmark modal-optimized-provider`; [`modal-optimized-provider-2026-07-30.json`](../benchmark-data/modal-optimized-provider-2026-07-30.json) |
 | Provider-default comparison | `computer-use benchmark compare`, followed by the provider sanitizer; [`provider-compare-coordinate-command-2026-07-30.json`](../benchmark-data/provider-compare-coordinate-command-2026-07-30.json) |
 | Current provider presentation | [Warm-operation results, 2026-07-30](benchmark-results-2026-07-30-warm-paths.md) |
+| External action-to-frame paths | [`run_external_action_frame_benchmark.py`](../scripts/run_external_action_frame_benchmark.py), `run_step_promotion.py`, then `benchmark action-frame-report`; [eligible 2026-08-11 result](benchmark-results-2026-08-11-provider-action-frame.md) |
 | Optimized SDK default promotion | [`run_optimized_default_promotion.py`](../scripts/run_optimized_default_promotion.py); [eligible 2026-08-08 result](benchmark-results-2026-08-08-optimized-default.md) |
 | Inline versus Managed Image Release lifecycle | [`run_modal_image_lifecycle_benchmark.py`](../scripts/run_modal_image_lifecycle_benchmark.py); [eligible standard-variant result, 2026-08-08](benchmark-results-2026-08-08-image-lifecycle.md) |
 | Action-to-frame observation | `computer-use benchmark modal-colocated-client --surface daemon-observation-stream`; [`modal-observation-2026-07-30.json`](../benchmark-data/modal-observation-2026-07-30.json) |

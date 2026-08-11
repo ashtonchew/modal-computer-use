@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import statistics
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,7 @@ from modal_computer_use.benchmarks.action_frame_report import (
 )
 
 SOURCE_SHA = "a" * 40
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TIMER_BOUNDARY = "caller_before_ordered_action_dispatch_to_validated_immediate_full_frame_bytes"
 SCREENSHOT = {"format": "png", "width": 1024, "height": 768, "show_cursor": False}
 
@@ -215,6 +217,7 @@ def _tracked_provider_source_artifact() -> dict[str, object]:
     provider = raw["providers"]["tzafon"]  # type: ignore[index]
     case = provider["cases"]["action_to_immediate_frame"]  # type: ignore[index]
     case["screenshot"]["show_cursor"] = None  # type: ignore[index]
+    del case["failures"]  # type: ignore[index]
     return {
         "schema_version": 1,
         "benchmark": "external-provider-action-frame-run",
@@ -257,6 +260,24 @@ def _cleanup_verification() -> dict[str, object]:
 
 def test_valid_action_frame_artifact_validates() -> None:
     validate_action_frame_report(_artifact())
+
+
+def test_tracked_action_frame_report_recomputes_and_renders() -> None:
+    artifact_path = PROJECT_ROOT / "benchmark-data/external-provider-action-frame-2026-08-11.json"
+    report_path = PROJECT_ROOT / "docs/benchmark-results-2026-08-11-provider-action-frame.md"
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    validate_action_frame_report(payload)
+
+    assert payload["status"] == "eligible"
+    assert [arm["provider"] for arm in payload["arms"]] == [
+        "modal-daemon",
+        "daytona",
+        "e2b",
+        "tzafon",
+    ]
+    assert all(arm["measured_iterations"] == 100 for arm in payload["arms"])
+    assert report_path.read_text(encoding="utf-8") == render_action_frame_report_markdown(payload)
 
 
 def test_assembler_binds_fresh_step_provider_and_cleanup_inputs() -> None:

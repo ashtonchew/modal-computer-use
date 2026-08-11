@@ -56,14 +56,10 @@ through its `actions`, `screenshot`, and `timing` fields.
 The returned screenshot is an immediate post-action frame. It is not application readiness. The
 caller decides whether to wait for a workload-specific condition before the next model turn.
 
-The [Computer Step promotion report](benchmark-results-2026-08-08-computer-step.md) measured 100
-interleaved pairs in one fixed topology. `computer.step()` measured 44.29 ms p50 and 52.57 ms p95.
-The prior `actions.run()` followed by `screenshots.full()` measured 47.14 ms p50 and 58.22 ms p95.
-The dated report contains the complete configuration and promotion decision.
-
-The article's opening 47.10 ms value is arithmetic over separate 37.25 ms raw-screenshot and
-9.85 ms click medians. It is not a measured fused turn and is not a latency promise for
-`computer.step()`.
+The [current action-to-frame report](benchmark-results-2026-08-11-provider-action-frame.md)
+measured one click followed by the next full screenshot across 100 samples. `computer.step()`
+measured 43.13 ms p50 and 46.35 ms p95. The report records each path's timer boundary, caller
+topology, screenshot format, request count, and cleanup result.
 
 Action-only calls, immediate action-to-frame calls, first-visual-change observations, and semantic
 readiness have different timer boundaries. Compare like with like:

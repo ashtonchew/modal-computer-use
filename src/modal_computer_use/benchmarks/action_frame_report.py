@@ -255,10 +255,10 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
         "",
         "**Evidence status:** eligible",
         "",
-        "This report presents complete measured paths for one logical action-to-frame case. "
-        "Each row includes its caller topology, requested region, resource shape, and public "
-        "SDK path. The evidence supports path-level comparison. A provider ranking requires "
-        "a separate matched campaign.",
+        "This report measures one click followed by the next full screenshot through four "
+        "public SDK paths. The paths use different caller topologies and screenshot formats. "
+        "Read the values as complete path measurements. A provider ranking needs a separate "
+        "campaign with matched configurations.",
         "",
         "## Results",
         "",
@@ -459,7 +459,8 @@ def _assemble_provider_arms(
         case = _mapping(case_value, f"provider {provider} action-to-frame case")
         if case.get("status") != "ok" or provider_result.get("status") != "ok":
             raise ActionFrameReportError(f"provider {provider} action-to-frame arm is incomplete")
-        if provider_result.get("failures") != [] or case.get("failures") != []:
+        case_failures = case.get("failures", [] if tracked_runner else None)
+        if provider_result.get("failures") != [] or case_failures != []:
             raise ActionFrameReportError(
                 f"provider {provider} action-to-frame arm contains failures"
             )
