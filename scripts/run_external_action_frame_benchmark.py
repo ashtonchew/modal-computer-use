@@ -54,6 +54,7 @@ ACTION_FRAME_TIMER_BOUNDARY = (
 )
 DEFAULT_WARMUP_ITERATIONS = 1
 DEFAULT_ITERATIONS = 100
+DEFAULT_COMPARE_TIMEOUT_SECONDS = 3600
 ENV_KEYS = frozenset(
     {
         "DAYTONA_API_KEY",
@@ -338,14 +339,18 @@ def execute_compare(command: list[str]) -> tuple[int, str, str]:
         if not existing_pythonpath
         else os.pathsep.join((source_path, existing_pythonpath))
     )
-    result = subprocess.run(  # noqa: S603 - command is assembled from fixed allowlisted flags.
-        command,
-        cwd=PROJECT_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=child_environment,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 - command is assembled from fixed allowlisted flags.
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=child_environment,
+            timeout=DEFAULT_COMPARE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return 124, "", f"compare command timed out after {DEFAULT_COMPARE_TIMEOUT_SECONDS}s"
     return result.returncode, result.stdout, result.stderr
 
 

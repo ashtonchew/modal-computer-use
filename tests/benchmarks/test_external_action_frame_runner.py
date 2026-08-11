@@ -302,6 +302,7 @@ def test_execute_compare_prepends_exact_source_path(monkeypatch) -> None:
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["env"] = kwargs["env"]
+        captured["timeout"] = kwargs["timeout"]
         return SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(runner.subprocess, "run", fake_run)
@@ -313,7 +314,23 @@ def test_execute_compare_prepends_exact_source_path(monkeypatch) -> None:
         "",
     )
     assert captured["command"] == [sys.executable, "-m", "modal_computer_use.cli"]
+    assert captured["timeout"] == runner.DEFAULT_COMPARE_TIMEOUT_SECONDS
     assert captured["env"]["PYTHONPATH"].split(os.pathsep)[:2] == [
         str(runner.PROJECT_ROOT / "src"),
         "/another/checkout/src",
     ]
+
+
+def test_execute_compare_converts_timeout_to_rejected_command(monkeypatch) -> None:
+    runner = _load_runner()
+
+    def fake_run(*_args, **_kwargs):
+        raise runner.subprocess.TimeoutExpired(cmd="compare", timeout=1)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    code, stdout, stderr = runner.execute_compare([sys.executable, "-m", "modal_computer_use.cli"])
+
+    assert code == 124
+    assert stdout == ""
+    assert "timed out" in stderr
