@@ -18,7 +18,7 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_base_url
-from .action_frame import ACTION_FRAME_CASE_ID
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -333,6 +333,17 @@ class DaytonaDriver:
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
             ),
+        }
+
+    def verify_action_frame_readback(self, sandbox: Any) -> dict[str, Any]:
+        return {
+            "cursor_position": verification_step(
+                lambda: verify_daytona_cursor_position(
+                    sandbox,
+                    expected=ACTION_FRAME_POINT,
+                ),
+                redacted_text=None,
+            )
         }
 
     def _run_command(self, sandbox: Any, command: str, *, timeout: int) -> str:

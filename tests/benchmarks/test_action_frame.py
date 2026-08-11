@@ -142,6 +142,8 @@ def test_action_frame_rejects_invalid_iteration_count() -> None:
 
 def test_action_frame_selector_runs_only_the_new_case() -> None:
     class Driver(_Driver):
+        action_verification_calls = 0
+
         def create_lifecycle_session(self) -> object:
             return object()
 
@@ -153,6 +155,19 @@ def test_action_frame_selector_runs_only_the_new_case() -> None:
 
         def screenshot_full(self, _resource: object) -> dict[str, Any]:
             raise AssertionError("legacy warm cases must not run")
+
+        def verify_readbacks(self, _resource: object) -> dict[str, Any]:
+            raise AssertionError("legacy cursor and type verification must not run")
+
+        def verify_action_frame_readback(self, _resource: object) -> dict[str, Any]:
+            self.action_verification_calls += 1
+            return {
+                "cursor_position": {
+                    "status": "ok",
+                    "expected": {"x": 512, "y": 384},
+                    "observed": {"x": 512, "y": 384},
+                }
+            }
 
     driver = Driver([_observation()])
     result = run_product_provider_cases(
@@ -168,6 +183,8 @@ def test_action_frame_selector_runs_only_the_new_case() -> None:
 
     assert set(result["cases"]) == {"action_to_immediate_frame"}
     assert driver.calls == 1
+    assert driver.action_verification_calls == 1
+    assert result["verification"]["cursor_position"]["status"] == "ok"
 
 
 def test_default_provider_comparison_does_not_add_action_frame_case() -> None:

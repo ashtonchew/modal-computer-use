@@ -145,7 +145,10 @@ def run_product_provider_cases(
                     _promote_accounting_metadata(result)
                     results[case] = result
             finally:
-                verifier = getattr(driver, "verify_readbacks", None)
+                verifier_name = (
+                    "verify_action_frame_readback" if action_frame_case else "verify_readbacks"
+                )
+                verifier = getattr(driver, verifier_name, None)
                 if callable(verifier):
                     try:
                         verification = sanitize_provider_observation(verifier(sandbox))

@@ -26,8 +26,14 @@ ACTION_FRAME_SCREENSHOT = {
     "format": "provider-native",
     "show_cursor": None,
 }
+ACTION_FRAME_POINT = (512, 384)
 ACTION_FRAME_ACTIONS = (
-    {"type": "click", "x": 512, "y": 384, "button": "left"},
+    {
+        "type": "click",
+        "x": ACTION_FRAME_POINT[0],
+        "y": ACTION_FRAME_POINT[1],
+        "button": "left",
+    },
 )
 ACTION_FRAME_ACTION_PAYLOAD_SHA256 = hashlib.sha256(
     json.dumps(ACTION_FRAME_ACTIONS, separators=(",", ":"), sort_keys=True).encode("utf-8")

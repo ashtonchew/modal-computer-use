@@ -19,7 +19,7 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
-from .action_frame import ACTION_FRAME_CASE_ID
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
 from .live import run_product_provider_cases, wait_for_provider_screenshot_ready
 from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
@@ -364,6 +364,21 @@ class TzafonDriver:
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
             ),
+        }
+
+    def verify_action_frame_readback(self, computer: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return provider_stdout(self._exec(computer, command, timeout=timeout))
+
+        return {
+            "cursor_position": verification_step(
+                lambda: verify_provider_cursor_position(
+                    run_command,
+                    query_command=_x11_cursor_readback_command(),
+                    expected=ACTION_FRAME_POINT,
+                ),
+                redacted_text=None,
+            )
         }
 
     def _type_text(self, computer: Any, text: str) -> dict[str, Any]:

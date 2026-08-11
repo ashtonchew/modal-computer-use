@@ -17,7 +17,7 @@ from ..constants import (
     coordinate_click_target,
 )
 from ..lifecycle import CleanupError
-from .action_frame import ACTION_FRAME_CASE_ID
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -259,6 +259,20 @@ class E2BDriver:
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
             ),
+        }
+
+    def verify_action_frame_readback(self, sandbox: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return self._run_command(sandbox, command, timeout=timeout)
+
+        return {
+            "cursor_position": verification_step(
+                lambda: verify_provider_cursor_position(
+                    run_command,
+                    expected=ACTION_FRAME_POINT,
+                ),
+                redacted_text=None,
+            )
         }
 
     def _run_command(self, sandbox: Any, command: str, *, timeout: int) -> str:
