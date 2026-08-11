@@ -25,6 +25,7 @@ SCOPE_CONTRACT = {
     "same_image": True,
     "same_fixture": True,
     "fresh_target_sandboxes": True,
+    "cgroup_scope": "configured-resource-only",
     "non_gating": True,
     "retries": 0,
     "replacement_samples": 0,
