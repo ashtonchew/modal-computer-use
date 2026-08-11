@@ -107,6 +107,20 @@ def _timing_row(*, direct: bool = False) -> dict[str, float]:
     return values
 
 
+def _scheduler_row(*, direct: bool = False) -> dict[str, float | None]:
+    return {
+        "capture_thread_cpu_ms": 0.001,
+        "capture_thread_runtime_ms": 0.001,
+        "capture_thread_runqueue_wait_ms": 0.0,
+        "worker_process_cpu_ms": None if direct else 0.0,
+        "worker_runtime_ms": None if direct else 0.0,
+        "worker_runqueue_wait_ms": None if direct else 0.0,
+        "xvfb_process_cpu_ms": 0.0,
+        "xvfb_runtime_ms": 0.0,
+        "xvfb_runqueue_wait_ms": 0.0,
+    }
+
+
 def _observation(*, passed: bool = True) -> dict[str, object]:
     rows = []
     for pair_index in range(probe.PAIRS):
@@ -125,6 +139,7 @@ def _observation(*, passed: bool = True) -> dict[str, object]:
                     "png_height": probe.REGION["height"],
                     "pixel_hash": "a" * 64,
                     "timing": _timing_row(direct=arm == probe.DIRECT_ARM),
+                    "scheduler": _scheduler_row(direct=arm == probe.DIRECT_ARM),
                 }
             )
     return {
@@ -515,7 +530,7 @@ def test_artifact_accepts_explicit_unavailable_cgroup_evidence() -> None:
     assert artifact["target_identity"]["period_usec"] is None
     assert artifact["target_identity"]["memory_bytes"] is None
     assert artifact["cgroup_scope"] == "configured-resource-only"
-    assert artifact["schema_version"] == "x11-shm-direct-vs-spawned.v3"
+    assert artifact["schema_version"] == "x11-shm-direct-vs-spawned.v4"
 
 
 @pytest.mark.parametrize(
@@ -851,6 +866,20 @@ def test_sessions_are_constructed_used_and_closed_on_pinned_threads(monkeypatch)
     result = asyncio.run(probe._run_child_inner(pairs=1, warmups=0, progress=probe._Progress()))
 
     assert result["passed"] is True
+    for arm in probe.ARMS:
+        scheduler = result["arms"][arm]["observations"][0]["scheduler"]
+        assert set(scheduler) == {
+            "capture_thread_cpu_ms",
+            "capture_thread_runtime_ms",
+            "capture_thread_runqueue_wait_ms",
+            "worker_process_cpu_ms",
+            "worker_runtime_ms",
+            "worker_runqueue_wait_ms",
+            "xvfb_process_cpu_ms",
+            "xvfb_runtime_ms",
+            "xvfb_runqueue_wait_ms",
+        }
+        assert scheduler["capture_thread_cpu_ms"] >= 0
     assert thread_ids[probe.DIRECT_ARM][-1][0] == "drop"
     for arm in probe.ARMS:
         observed_threads = {thread for _, thread in thread_ids[arm]}

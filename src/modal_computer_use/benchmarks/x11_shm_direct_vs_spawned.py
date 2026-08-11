@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from statistics import median
-from time import perf_counter_ns
+from threading import get_native_id
+from time import perf_counter_ns, thread_time_ns
 from typing import Any, Literal, cast
 
 from PIL import Image, UnidentifiedImageError
@@ -58,7 +59,7 @@ CLEANUP_TIMEOUT_SECONDS = 2.5
 ARMS: tuple[ArmName, ArmName] = ("direct_native", "spawned_worker")
 DIRECT_ARM: ArmName = "direct_native"
 SPAWNED_ARM: ArmName = "spawned_worker"
-SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v3"
+SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v4"
 BENCHMARK_NAME = "x11-shm-direct-vs-spawned"
 CONFIGURED_RESOURCES = {
     "cpu": 1.0,
@@ -135,6 +136,17 @@ _TIMING_FIELDS = (
     "parent_payload_read_ms",
     "parent_total_ms",
 )
+_SCHEDULER_FIELDS = (
+    "capture_thread_cpu_ms",
+    "capture_thread_runtime_ms",
+    "capture_thread_runqueue_wait_ms",
+    "worker_process_cpu_ms",
+    "worker_runtime_ms",
+    "worker_runqueue_wait_ms",
+    "xvfb_process_cpu_ms",
+    "xvfb_runtime_ms",
+    "xvfb_runqueue_wait_ms",
+)
 SCOPE_CONTRACT = {
     "same_sandbox": True,
     "same_xvfb_display": True,
@@ -206,6 +218,14 @@ class _CaptureSample:
     elapsed_ms: float
     timing: NativeCaptureTiming
     pixel_hash: str
+    scheduler: dict[str, float | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _ProcessCounters:
+    cpu_ns: int | None
+    runtime_ns: int | None
+    runqueue_wait_ns: int | None
 
 
 class _SessionExecutor:
@@ -503,6 +523,29 @@ def _validate_timing(value: object) -> dict[str, float]:
     return retained
 
 
+def _validate_scheduler(value: object, *, expected_arm: str) -> dict[str, float | None]:
+    if not isinstance(value, Mapping) or set(value) != set(_SCHEDULER_FIELDS):
+        raise ValueError("invalid scheduler evidence")
+    retained: dict[str, float | None] = {}
+    for key in _SCHEDULER_FIELDS:
+        item = value[key]
+        retained[key] = (
+            None if item is None else _finite_nonnegative(item, f"scheduler evidence {key}")
+        )
+    if retained["capture_thread_cpu_ms"] is None:
+        raise ValueError("capture thread CPU evidence is unavailable")
+    if expected_arm == DIRECT_ARM and any(
+        retained[key] is not None
+        for key in (
+            "worker_process_cpu_ms",
+            "worker_runtime_ms",
+            "worker_runqueue_wait_ms",
+        )
+    ):
+        raise ValueError("direct capture retained worker scheduler evidence")
+    return retained
+
+
 def _validate_sample(value: object, *, expected_arm: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("invalid capture observation")
@@ -518,6 +561,7 @@ def _validate_sample(value: object, *, expected_arm: str) -> dict[str, Any]:
         "png_height",
         "pixel_hash",
         "timing",
+        "scheduler",
     }
     if set(value) != required:
         raise ValueError("invalid capture observation")
@@ -548,6 +592,7 @@ def _validate_sample(value: object, *, expected_arm: str) -> dict[str, Any]:
     ):
         raise ValueError("invalid decoded pixel hash")
     timing = _validate_timing(value["timing"])
+    scheduler = _validate_scheduler(value["scheduler"], expected_arm=expected_arm)
     if elapsed_ms + 1e-6 < timing["executor_queue_ms"] + timing["parent_total_ms"]:
         raise ValueError("capture elapsed time is shorter than its retained stages")
     if expected_arm == DIRECT_ARM:
@@ -593,6 +638,7 @@ def _validate_sample(value: object, *, expected_arm: str) -> dict[str, Any]:
         "png_height": REGION["height"],
         "pixel_hash": pixel_hash,
         "timing": timing,
+        "scheduler": scheduler,
     }
 
 
@@ -762,6 +808,7 @@ def _timing_to_row(
         "png_height": REGION["height"],
         "pixel_hash": sample.pixel_hash,
         "timing": values,
+        "scheduler": dict(sample.scheduler),
     }
 
 
@@ -911,6 +958,70 @@ class SpawnedWorkerSession:
             session.close()
         finally:
             self._session = None
+
+
+def _optional_schedstat(pid: int, *, tid: int | None = None) -> tuple[int, int] | None:
+    path = (
+        Path(f"/proc/{pid}/task/{tid}/schedstat")
+        if tid is not None
+        else Path(f"/proc/{pid}/schedstat")
+    )
+    try:
+        fields = path.read_text(encoding="utf-8").split()
+        if len(fields) < 2:
+            return None
+        runtime_ns, runqueue_wait_ns = int(fields[0]), int(fields[1])
+    except (OSError, ValueError):
+        return None
+    if runtime_ns < 0 or runqueue_wait_ns < 0:
+        return None
+    return runtime_ns, runqueue_wait_ns
+
+
+def _optional_process_cpu_ns(pid: int) -> int | None:
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(") ", 1)[1].split()
+        ticks = int(fields[11]) + int(fields[12])
+        ticks_per_second = int(os.sysconf("SC_CLK_TCK"))
+    except (OSError, ValueError, IndexError):
+        return None
+    if ticks < 0 or ticks_per_second <= 0:
+        return None
+    return ticks * 1_000_000_000 // ticks_per_second
+
+
+def _process_counters(pid: int | None) -> _ProcessCounters:
+    if pid is None:
+        return _ProcessCounters(None, None, None)
+    schedstat = _optional_schedstat(pid)
+    return _ProcessCounters(
+        _optional_process_cpu_ns(pid),
+        None if schedstat is None else schedstat[0],
+        None if schedstat is None else schedstat[1],
+    )
+
+
+def _find_xvfb_pid(proc_root: Path = Path("/proc")) -> int | None:
+    candidates: list[int] = []
+    try:
+        entries = tuple(proc_root.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        try:
+            if (entry / "comm").read_text(encoding="utf-8").strip() == "Xvfb":
+                candidates.append(int(entry.name))
+        except (OSError, ValueError):
+            continue
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _counter_delta(after: int | None, before: int | None) -> float | None:
+    if after is None or before is None or after < before:
+        return None
+    return (after - before) / 1_000_000
 
 
 def _process_identity(pid: int) -> dict[str, int]:
@@ -1135,6 +1246,7 @@ async def _capture_call(
     session: Any,
     *,
     executor: Executor,
+    xvfb_pid: int | None,
     pair_index: int,
     sequence: int,
     position: int,
@@ -1143,18 +1255,55 @@ async def _capture_call(
     submitted_ns = perf_counter_ns()
     entered_ns = 0
 
-    def call() -> tuple[int, bytes, NativeCaptureTiming]:
+    def call() -> tuple[int, bytes, NativeCaptureTiming, dict[str, float | None]]:
         nonlocal entered_ns
         entered_ns = perf_counter_ns()
+        capture_tid = get_native_id()
+        thread_cpu_before = thread_time_ns()
+        thread_sched_before = _optional_schedstat(os.getpid(), tid=capture_tid)
+        worker_pid = _spawned_worker_pid(session) if arm == SPAWNED_ARM else None
+        worker_before = _process_counters(worker_pid)
+        xvfb_before = _process_counters(xvfb_pid)
         data, timing = session.capture_png_with_timing(**REGION)
+        xvfb_after = _process_counters(xvfb_pid)
+        worker_after = _process_counters(worker_pid)
+        thread_sched_after = _optional_schedstat(os.getpid(), tid=capture_tid)
+        thread_cpu_after = thread_time_ns()
         if not isinstance(data, bytes) or not 0 < len(data) <= 64 * 1024**2:
             raise ScreenshotCaptureFailed("capture returned an invalid payload")
         if not isinstance(timing, NativeCaptureTiming):
             raise ScreenshotCaptureFailed("capture returned invalid timing")
-        return entered_ns, data, timing
+        scheduler = {
+            "capture_thread_cpu_ms": (thread_cpu_after - thread_cpu_before) / 1_000_000,
+            "capture_thread_runtime_ms": _counter_delta(
+                None if thread_sched_after is None else thread_sched_after[0],
+                None if thread_sched_before is None else thread_sched_before[0],
+            ),
+            "capture_thread_runqueue_wait_ms": _counter_delta(
+                None if thread_sched_after is None else thread_sched_after[1],
+                None if thread_sched_before is None else thread_sched_before[1],
+            ),
+            "worker_process_cpu_ms": _counter_delta(
+                worker_after.cpu_ns, worker_before.cpu_ns
+            ),
+            "worker_runtime_ms": _counter_delta(
+                worker_after.runtime_ns, worker_before.runtime_ns
+            ),
+            "worker_runqueue_wait_ms": _counter_delta(
+                worker_after.runqueue_wait_ns, worker_before.runqueue_wait_ns
+            ),
+            "xvfb_process_cpu_ms": _counter_delta(xvfb_after.cpu_ns, xvfb_before.cpu_ns),
+            "xvfb_runtime_ms": _counter_delta(
+                xvfb_after.runtime_ns, xvfb_before.runtime_ns
+            ),
+            "xvfb_runqueue_wait_ms": _counter_delta(
+                xvfb_after.runqueue_wait_ns, xvfb_before.runqueue_wait_ns
+            ),
+        }
+        return entered_ns, data, timing, scheduler
 
     resumed_ns = 0
-    entered_ns, data, timing = await _bounded_call(call, executor=executor)
+    entered_ns, data, timing, scheduler = await _bounded_call(call, executor=executor)
     resumed_ns = perf_counter_ns()
     pixel_hash = _decode_rgb_pixel_hash(data)
     sample = _CaptureSample(
@@ -1162,6 +1311,7 @@ async def _capture_call(
         elapsed_ms=(resumed_ns - submitted_ns) / 1_000_000,
         timing=timing,
         pixel_hash=pixel_hash,
+        scheduler=scheduler,
     )
     row = _timing_to_row(
         sample,
@@ -1228,6 +1378,7 @@ async def _run_child_inner(
     progress.phase = "module_identity"
     module_identity = _module_identity(native)
     target_identity = _target_identity(native, display=display, progress=progress)
+    xvfb_pid = _find_xvfb_pid()
     sessions: dict[str, Any] = {}
     identities_before: dict[str, dict[str, int]] = {}
     failures: dict[str, dict[str, Any] | None] = {arm: None for arm in ARMS}
@@ -1292,6 +1443,7 @@ async def _run_child_inner(
                     await _capture_call(
                         sessions[arm],
                         executor=executors[arm].executor,
+                        xvfb_pid=xvfb_pid,
                         pair_index=warmup_index,
                         sequence=warmup_index * 2 + position,
                         position=position,
@@ -1323,6 +1475,7 @@ async def _run_child_inner(
                     row = await _capture_call(
                         sessions[arm],
                         executor=executors[arm].executor,
+                        xvfb_pid=xvfb_pid,
                         pair_index=pair_index,
                         sequence=pair_index * 2 + position,
                         position=position,
