@@ -421,6 +421,55 @@ def test_spawned_process_owner_times_out_and_reaps_stalled_child(
     session.close()
 
 
+def test_timed_spawned_process_owner_classifies_worker_process_deadline(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "_modal_computer_use_x11_shm.py").write_text(
+        "\n".join(
+            [
+                "import time",
+                "class X11ScreenshotTimeoutError(RuntimeError):",
+                "    pass",
+                "class X11SharedMemoryScreenshotSession:",
+                "    def __init__(self, display, width, height):",
+                "        pass",
+                "    def capture_png_timed(self, x, y, width, height):",
+                "        time.sleep(10)",
+                "    def close(self):",
+                "        pass",
+            ]
+        )
+        + "\n"
+    )
+    existing_path = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(tmp_path) if not existing_path else f"{tmp_path}{os.pathsep}{existing_path}",
+    )
+    monkeypatch.setattr(screenshot_capture, "_WORKER_OPERATION_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(
+            __name__="_modal_computer_use_x11_shm",
+            X11ScreenshotTimeoutError=RuntimeError,
+            X11SharedMemoryScreenshotSession=object,
+        ),
+    )
+    session = screenshot_capture.X11SharedMemoryScreenshotSession(
+        display=":99", width=10, height=11
+    )
+    process = session._session._process
+
+    with pytest.raises(screenshot_capture.ScreenshotCaptureTimedOut) as caught:
+        session.capture_png_with_timing(x=0, y=0, width=10, height=11)
+
+    assert caught.value.timeout_origin == "worker_process_deadline"
+    assert process is not None
+    assert process.poll() is not None
+    session.close()
+
+
 def test_spawned_process_owner_classifies_native_reply_deadline(
     tmp_path, monkeypatch
 ) -> None:

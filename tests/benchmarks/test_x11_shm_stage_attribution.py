@@ -9,6 +9,7 @@ import pytest
 from modal_computer_use.benchmarks import x11_shm_stage_attribution as stage
 from modal_computer_use.daemon.desktop.screenshot_capture import (
     NativeCaptureTiming,
+    ScreenshotCaptureTimedOut,
 )
 
 PROVENANCE = {
@@ -348,6 +349,101 @@ def test_stage_child_retains_first_capture_failure_phase(monkeypatch) -> None:
     assert result["failure_phase"] == "warmup_full_capture"
 
 
+def test_stage_child_retains_timeout_origin_and_completed_counts(monkeypatch) -> None:
+    async def fail_after_progress(
+        *, captures: int, warmups: int, progress: stage._StageProgress
+    ) -> dict[str, object]:
+        assert captures == stage.CAPTURES
+        assert warmups == stage.WARMUPS
+        progress.warmups_completed = stage.WARMUPS
+        progress.captures_completed = 1
+        progress.full_captures = 1
+        progress.region_captures = 0
+        progress.phase = "measured_region_capture"
+        raise ScreenshotCaptureTimedOut(
+            "private timeout detail",
+            timeout_origin="native_x11_reply_deadline",
+        )
+
+    monkeypatch.setattr(stage, "_run_child_inner", fail_after_progress)
+
+    result = stage.run_child()
+
+    assert result == {
+        "passed": False,
+        "warmups_completed": stage.WARMUPS,
+        "captures_completed": 1,
+        "full_captures": 1,
+        "region_captures": 0,
+        "failure_type": "ScreenshotCaptureTimedOut",
+        "failure_phase": "measured_region_capture",
+        "failure_timeout_origin": "native_x11_reply_deadline",
+    }
+
+
+def test_rejected_stage_artifact_retains_safe_timeout_origin() -> None:
+    observation = {
+        "passed": False,
+        "warmups_completed": stage.WARMUPS,
+        "captures_completed": 1,
+        "full_captures": 1,
+        "region_captures": 0,
+        "failure_type": "ScreenshotCaptureTimedOut",
+        "failure_phase": "measured_region_capture",
+        "failure_timeout_origin": "worker_process_deadline",
+        "target_identity": _observation()["target_identity"],
+        "cgroup_available": False,
+        "cgroup_version": None,
+    }
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["warmups_completed"] == stage.WARMUPS
+    assert artifact["captures_completed"] == 1
+    assert artifact["failure_timeout_origin"] == "worker_process_deadline"
+    assert artifact["target_identity"]["image_object_id"] == "im-test"
+    assert artifact["cgroup_scope"] == "unavailable"
+    assert artifact["daemon_requested_source"] == "mss"
+
+
+def test_rejected_stage_artifact_rejects_inconsistent_capture_phase() -> None:
+    observation = {
+        "passed": False,
+        "warmups_completed": stage.WARMUPS,
+        "captures_completed": 1,
+        "full_captures": 1,
+        "region_captures": 0,
+        "failure_type": "ScreenshotCaptureTimedOut",
+        "failure_phase": "measured_full_capture",
+        "failure_timeout_origin": "native_x11_reply_deadline",
+    }
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+    assert artifact["failure_timeout_origin"] is None
+
+
+def test_rejected_child_stage_artifact_rejects_unknown_safe_phase() -> None:
+    observation = {
+        "passed": False,
+        "warmups_completed": 0,
+        "captures_completed": 0,
+        "full_captures": 0,
+        "region_captures": 0,
+        "failure_type": "RuntimeError",
+        "failure_phase": "plausible_but_unknown",
+        "target_identity": _observation()["target_identity"],
+    }
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+
+
 def test_complete_stage_artifact_requires_fixed_safe_contract() -> None:
     artifact = stage.build_artifact(
         _observation(),
@@ -404,7 +500,7 @@ def test_complete_stage_artifact_can_disclose_unavailable_cgroup_counters() -> N
     assert artifact["cgroup_available"] is False
     assert artifact["cgroup_version"] is None
     assert artifact["cgroup_cpu_stat_delta"] is None
-    assert artifact["schema_version"] == "x11-shm-stage-attribution.v2"
+    assert artifact["schema_version"] == "x11-shm-stage-attribution.v3"
 
 
 def test_stage_artifact_rejects_mixed_unavailable_cgroup_evidence() -> None:
