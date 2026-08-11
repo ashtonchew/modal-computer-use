@@ -126,6 +126,24 @@ async def _measure_profile(
     }
 
 
+async def _measure_profiles(order: str) -> dict[str, Any]:
+    execution_order = probe.execution_order(order)
+    invocation_tag = f"{RUN_TAG_PREFIX}-{uuid.uuid4().hex}"
+    runs: dict[str, Any] = {}
+    for label in execution_order:
+        runs[label] = await _measure_profile(
+            label,
+            probe.CPU_RUNS[label],
+            invocation_tag=invocation_tag,
+        )
+    return {
+        "runs": runs,
+        "execution_order": list(execution_order),
+        "fixture_identity": _FIXTURE_IDENTITY,
+        "source_identity": _source_identity(runs),
+    }
+
+
 @app.function(
     image=image,
     cpu=OUTER_CPU,
@@ -134,27 +152,12 @@ async def _measure_profile(
     region=MODAL_REGION,
     retries=0,
 )
-def run() -> dict[str, Any]:
-    async def measure() -> dict[str, Any]:
-        invocation_tag = f"{RUN_TAG_PREFIX}-{uuid.uuid4().hex}"
-        runs: dict[str, Any] = {}
-        for label, resources in probe.CPU_RUNS.items():
-            runs[label] = await _measure_profile(
-                label,
-                resources,
-                invocation_tag=invocation_tag,
-            )
-        return {
-            "runs": runs,
-            "fixture_identity": _FIXTURE_IDENTITY,
-            "source_identity": _source_identity(runs),
-        }
-
-    return asyncio.run(measure())
+def run(order: str = "forward") -> dict[str, Any]:
+    return asyncio.run(_measure_profiles(order))
 
 
 @app.local_entrypoint()
-def main(output: str | None = None) -> None:
+def main(output: str | None = None, order: str = "forward") -> None:
     if not output:
         raise SystemExit("an explicit --output artifact path is required")
     path = Path(output).expanduser()
@@ -162,12 +165,16 @@ def main(output: str | None = None) -> None:
         raise SystemExit("--output must be an absolute path")
     if path.exists() or path.is_symlink():
         raise SystemExit("--output already exists; refusing to overwrite it")
+    try:
+        requested_order = list(probe.execution_order(order))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     path.parent.mkdir(parents=True, exist_ok=True)
     provenance = {
         label: base_runner.local_provenance(float(resources["cpu"]))
         for label, resources in probe.CPU_RUNS.items()
     }
-    remote = cast(Mapping[str, Any], run.remote())
+    remote = cast(Mapping[str, Any], run.remote(order))
     raw_runs = remote.get("runs")
     if not isinstance(raw_runs, Mapping):
         raw_runs = {}
@@ -185,10 +192,13 @@ def main(output: str | None = None) -> None:
     fixture_identity = remote.get("fixture_identity")
     fixture_identity = fixture_identity if fixture_identity == _FIXTURE_IDENTITY else ""
     source_identity = remote.get("source_identity")
+    remote_order = remote.get("execution_order")
+    execution_order = remote_order if remote_order == requested_order else None
     artifact = probe.build_artifact(
         runs,
         fixture_identity=fixture_identity,
         source_identity=source_identity if isinstance(source_identity, Mapping) else {},
+        execution_order=execution_order,
     )
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = None

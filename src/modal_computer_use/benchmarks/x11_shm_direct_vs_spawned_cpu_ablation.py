@@ -13,11 +13,15 @@ from typing import Any
 
 from modal_computer_use.benchmarks import x11_shm_direct_vs_spawned as _base
 
-SCHEMA_VERSION = "x11-shm-direct-vs-spawned-cpu-ablation.v1"
+SCHEMA_VERSION = "x11-shm-direct-vs-spawned-cpu-ablation.v2"
 BENCHMARK_NAME = "x11-shm-direct-vs-spawned-cpu-ablation"
 CPU_RUNS = {
     "cpu_1": {"cpu": 1.0, "memory_bytes": 2048 * 1024**2},
     "cpu_2": {"cpu": 2.0, "memory_bytes": 2048 * 1024**2},
+}
+EXECUTION_ORDERS = {
+    "forward": ("cpu_1", "cpu_2"),
+    "reverse": ("cpu_2", "cpu_1"),
 }
 SCOPE_CONTRACT = {
     "same_workload": True,
@@ -82,6 +86,24 @@ def _validate_sandbox_id(value: object) -> str:
     ):
         raise ValueError("invalid target Sandbox identity")
     return value
+
+
+def execution_order(order: str) -> tuple[str, str]:
+    """Return one exact CPU profile permutation for a live invocation."""
+
+    try:
+        return EXECUTION_ORDERS[order]
+    except (KeyError, TypeError):
+        raise ValueError("execution order must be forward or reverse") from None
+
+
+def _validate_execution_order(value: object) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("invalid CPU execution order")
+    labels = tuple(value)
+    if labels not in set(EXECUTION_ORDERS.values()):
+        raise ValueError("invalid CPU execution order")
+    return list(labels)
 
 
 def _validate_resources(
@@ -173,7 +195,11 @@ def _comparison(artifact: Mapping[str, Any]) -> dict[str, Any]:
     return {"by_arm": by_arm}
 
 
-def _invalid_artifact(*, fixture_identity: str | None = None) -> dict[str, Any]:
+def _invalid_artifact(
+    *,
+    fixture_identity: str | None = None,
+    execution_order: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "benchmark": BENCHMARK_NAME,
@@ -183,6 +209,7 @@ def _invalid_artifact(*, fixture_identity: str | None = None) -> dict[str, Any]:
         **SCOPE_CONTRACT,
         "fixture_identity": fixture_identity,
         "configured_resources": {label: dict(resources) for label, resources in CPU_RUNS.items()},
+        "execution_order": execution_order,
         "source_identity": None,
         "runs": {},
         "comparison": {},
@@ -200,12 +227,14 @@ def build_artifact(
     *,
     fixture_identity: str,
     source_identity: Mapping[str, Any],
+    execution_order: object,
 ) -> dict[str, Any]:
     """Validate two fixed-resource child results into one safe artifact."""
 
     try:
         if set(runs) != set(CPU_RUNS):
             raise ValueError("CPU ablation requires exactly 1CPU and 2CPU runs")
+        retained_order = _validate_execution_order(execution_order)
         fixture = _validate_fixture_identity(fixture_identity)
         source = _validate_source_identity(source_identity)
         retained_runs: dict[str, Any] = {}
@@ -336,6 +365,7 @@ def build_artifact(
             "configured_resources": {
                 label: dict(resources) for label, resources in CPU_RUNS.items()
             },
+            "execution_order": retained_order,
             "source_identity": source,
             "runs": retained_runs,
             "comparison": {label: retained_runs[label]["comparison"] for label in CPU_RUNS},
@@ -352,7 +382,14 @@ def build_artifact(
             safe_fixture = _validate_fixture_identity(fixture_identity)
         except (TypeError, ValueError):
             safe_fixture = None
-        return _invalid_artifact(fixture_identity=safe_fixture)
+        try:
+            safe_order = _validate_execution_order(execution_order)
+        except (TypeError, ValueError):
+            safe_order = None
+        return _invalid_artifact(
+            fixture_identity=safe_fixture,
+            execution_order=safe_order,
+        )
 
 
 def fixture_identity(html: str) -> str:

@@ -160,6 +160,28 @@ def test_measure_profile_uses_fresh_context_for_each_cpu(monkeypatch) -> None:
     assert [result["sandbox_id"] for result in results] == ["sb-1", "sb-2"]
 
 
+def test_measure_profiles_retains_reverse_execution_order(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_measure(
+        label: str,
+        _resources: object,
+        *,
+        invocation_tag: str,
+    ) -> dict[str, object]:
+        assert invocation_tag.startswith(runner.RUN_TAG_PREFIX)
+        calls.append(label)
+        return {"observation": {}, "cleanup": {}, "sandbox_id": f"sb-{label}"}
+
+    monkeypatch.setattr(runner, "_measure_profile", fake_measure)
+    monkeypatch.setattr(runner, "_source_identity", lambda _runs: {})
+
+    result = asyncio.run(runner._measure_profiles("reverse"))
+
+    assert calls == ["cpu_2", "cpu_1"]
+    assert result["execution_order"] == ["cpu_2", "cpu_1"]
+
+
 def test_main_refuses_existing_output_before_remote_dispatch(monkeypatch, tmp_path: Path) -> None:
     output = tmp_path / "existing.json"
     output.write_text("keep", encoding="utf-8")

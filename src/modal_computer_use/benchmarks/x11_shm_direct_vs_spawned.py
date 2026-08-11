@@ -59,7 +59,7 @@ CLEANUP_TIMEOUT_SECONDS = 2.5
 ARMS: tuple[ArmName, ArmName] = ("direct_native", "spawned_worker")
 DIRECT_ARM: ArmName = "direct_native"
 SPAWNED_ARM: ArmName = "spawned_worker"
-SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v4"
+SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v5"
 BENCHMARK_NAME = "x11-shm-direct-vs-spawned"
 CONFIGURED_RESOURCES = {
     "cpu": 1.0,
@@ -179,6 +179,9 @@ class _ProbeFailure(RuntimeError):
             failure_type if failure_type in SAFE_ARM_FAILURE_TYPES else "RuntimeError"
         )
         self.timeout_origin = timeout_origin if timeout_origin in SAFE_TIMEOUT_ORIGINS else None
+        self.scheduler: dict[str, float | None] | None = None
+        self.scheduler_complete = False
+        self.measurement_state: str | None = None
         super().__init__("direct/spawned discriminator failed")
 
 
@@ -226,6 +229,82 @@ class _ProcessCounters:
     cpu_ns: int | None
     runtime_ns: int | None
     runqueue_wait_ns: int | None
+
+
+@dataclass(slots=True)
+class _CaptureEvidence:
+    """Bounded, benchmark-private counters for one capture attempt."""
+
+    arm: ArmName
+    xvfb_pid: int | None
+    worker_pid: int | None = None
+    capture_tid: int | None = None
+    thread_cpu_before_ns: int | None = None
+    thread_cpu_after_ns: int | None = None
+    thread_sched_before: tuple[int, int] | None = None
+    thread_sched_after: tuple[int, int] | None = None
+    worker_before: _ProcessCounters = _ProcessCounters(None, None, None)
+    worker_after: _ProcessCounters = _ProcessCounters(None, None, None)
+    xvfb_before: _ProcessCounters = _ProcessCounters(None, None, None)
+    xvfb_after: _ProcessCounters = _ProcessCounters(None, None, None)
+
+    def scheduler(self) -> dict[str, float | None]:
+        return {
+            "capture_thread_cpu_ms": _counter_delta(
+                self.thread_cpu_after_ns, self.thread_cpu_before_ns
+            ),
+            "capture_thread_runtime_ms": _counter_delta(
+                None if self.thread_sched_after is None else self.thread_sched_after[0],
+                None if self.thread_sched_before is None else self.thread_sched_before[0],
+            ),
+            "capture_thread_runqueue_wait_ms": _counter_delta(
+                None if self.thread_sched_after is None else self.thread_sched_after[1],
+                None if self.thread_sched_before is None else self.thread_sched_before[1],
+            ),
+            "worker_process_cpu_ms": _counter_delta(
+                self.worker_after.cpu_ns, self.worker_before.cpu_ns
+            ),
+            "worker_runtime_ms": _counter_delta(
+                self.worker_after.runtime_ns, self.worker_before.runtime_ns
+            ),
+            "worker_runqueue_wait_ms": _counter_delta(
+                self.worker_after.runqueue_wait_ns, self.worker_before.runqueue_wait_ns
+            ),
+            "xvfb_process_cpu_ms": _counter_delta(
+                self.xvfb_after.cpu_ns, self.xvfb_before.cpu_ns
+            ),
+            "xvfb_runtime_ms": _counter_delta(
+                self.xvfb_after.runtime_ns, self.xvfb_before.runtime_ns
+            ),
+            "xvfb_runqueue_wait_ms": _counter_delta(
+                self.xvfb_after.runqueue_wait_ns, self.xvfb_before.runqueue_wait_ns
+            ),
+        }
+
+    def finish(self) -> dict[str, float | None]:
+        self.worker_after = _process_counters(self.worker_pid)
+        self.xvfb_after = _process_counters(self.xvfb_pid)
+        self.thread_sched_after = _optional_schedstat(os.getpid(), tid=self.capture_tid)
+        self.thread_cpu_after_ns = thread_time_ns()
+        return self.scheduler()
+
+    def snapshot_in_flight(self) -> dict[str, float | None]:
+        """Sample only counters observable at the outer deadline.
+
+        The capture thread is still running, so its high-resolution CPU delta
+        has no safe after value.  Process and schedstat counters are sampled at
+        the deadline and remain explicitly nullable when procfs is unavailable.
+        """
+
+        self.worker_after = _process_counters(self.worker_pid)
+        self.xvfb_after = _process_counters(self.xvfb_pid)
+        self.thread_sched_after = (
+            None
+            if self.capture_tid is None
+            else _optional_schedstat(os.getpid(), tid=self.capture_tid)
+        )
+        self.thread_cpu_after_ns = None
+        return self.scheduler()
 
 
 class _SessionExecutor:
@@ -647,9 +726,19 @@ def _validate_failure(value: object, *, expected_arm: str) -> dict[str, Any] | N
         return None
     if not isinstance(value, Mapping):
         raise ValueError("invalid arm failure")
-    allowed = {"pair_index", "phase", "failure_type", "timeout_origin"}
+    allowed = {
+        "pair_index",
+        "phase",
+        "failure_type",
+        "timeout_origin",
+        "scheduler",
+        "scheduler_complete",
+        "measurement_state",
+    }
     if set(value) != allowed:
-        raise ValueError("invalid arm failure")
+        base = {"pair_index", "phase", "failure_type", "timeout_origin"}
+        if set(value) != base:
+            raise ValueError("invalid arm failure")
     pair_index = _bounded_count(value["pair_index"], "failure pair index", maximum=PAIRS - 1)
     phase = _safe_label(value["phase"], allowed=SAFE_FAILURE_PHASES)
     failure_type = _safe_label(value["failure_type"], allowed=SAFE_ARM_FAILURE_TYPES)
@@ -669,11 +758,93 @@ def _validate_failure(value: object, *, expected_arm: str) -> dict[str, Any] | N
             raise ValueError("spawned arm retained an invalid timeout origin")
     elif origin is not None:
         raise ValueError("non-timeout arm failure retained timeout origin")
-    return {
+    retained: dict[str, Any] = {
         "pair_index": pair_index,
         "phase": phase,
         "failure_type": failure_type,
         "timeout_origin": origin,
+    }
+    has_evidence = any(
+        key in value for key in ("scheduler", "scheduler_complete", "measurement_state")
+    )
+    if has_evidence:
+        if failure_type not in {
+            "X11ScreenshotTimeoutError",
+            "ScreenshotCaptureTimedOut",
+            "TimeoutError",
+        }:
+            raise ValueError("non-timeout arm failure retained scheduler evidence")
+        if set(value) != allowed:
+            raise ValueError("timeout scheduler evidence is incomplete")
+        scheduler = _validate_failure_scheduler(value["scheduler"], expected_arm=expected_arm)
+        complete = value["scheduler_complete"]
+        state = value["measurement_state"]
+        if not isinstance(complete, bool) or state not in {"exception", "in_flight"}:
+            raise ValueError("invalid timeout measurement state")
+        if state == "exception" and not complete:
+            raise ValueError("exception timeout evidence must be complete")
+        if state == "in_flight" and complete:
+            raise ValueError("in-flight timeout evidence cannot be complete")
+        if origin == "benchmark_call_deadline" and state != "in_flight":
+            raise ValueError("benchmark deadline evidence must be in-flight")
+        if origin != "benchmark_call_deadline" and state != "exception":
+            raise ValueError("native timeout evidence must be exception-scoped")
+        retained["scheduler"] = scheduler
+        retained["scheduler_complete"] = complete
+        retained["measurement_state"] = state
+    return retained
+
+
+def _validate_failure_scheduler(value: object, *, expected_arm: str) -> dict[str, float | None]:
+    if not isinstance(value, Mapping) or set(value) != set(_SCHEDULER_FIELDS):
+        raise ValueError("invalid timeout scheduler evidence")
+    retained: dict[str, float | None] = {}
+    for key in _SCHEDULER_FIELDS:
+        item = value[key]
+        retained[key] = (
+            None
+            if item is None
+            else _finite_nonnegative(item, f"scheduler evidence {key}")
+        )
+    if expected_arm == DIRECT_ARM and any(
+        retained[key] is not None
+        for key in ("worker_process_cpu_ms", "worker_runtime_ms", "worker_runqueue_wait_ms")
+    ):
+        raise ValueError("direct timeout retained worker scheduler evidence")
+    return retained
+
+
+def _validate_failure_attempt(value: object) -> dict[str, Any]:
+    required = {
+        "arm",
+        "pair_index",
+        "phase",
+        "scheduler",
+        "scheduler_complete",
+        "measurement_state",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ValueError("invalid terminal failure attempt")
+    arm = value["arm"]
+    if arm not in ARMS:
+        raise ValueError("invalid terminal failure arm")
+    phase = _safe_label(value["phase"], allowed=SAFE_FAILURE_PHASES)
+    if phase not in {"warmup_capture", "measured_capture"}:
+        raise ValueError("invalid terminal failure phase")
+    maximum = WARMUPS - 1 if phase == "warmup_capture" else PAIRS - 1
+    pair_index = _bounded_count(value["pair_index"], "terminal failure pair", maximum=maximum)
+    scheduler = _validate_failure_scheduler(value["scheduler"], expected_arm=arm)
+    if value["scheduler_complete"] is not False or value["measurement_state"] != "in_flight":
+        raise ValueError("terminal failure must retain in-flight evidence")
+    if scheduler["capture_thread_cpu_ms"] is not None:
+        raise ValueError("in-flight timeout cannot claim completed capture-thread CPU")
+    return {
+        "arm": arm,
+        "pair_index": pair_index,
+        "phase": phase,
+        "scheduler": scheduler,
+        "scheduler_complete": False,
+        "measurement_state": "in_flight",
     }
 
 
@@ -711,8 +882,8 @@ def _validate_rejected_envelope(observation: Mapping[str, Any]) -> dict[str, Any
         "failure_type",
         "failure_phase",
     }
-    allowed = required | {"failure_timeout_origin"}
-    if set(observation) not in {frozenset(required), frozenset(allowed)}:
+    optional = {"failure_timeout_origin", "failure_attempt"}
+    if not set(observation).issubset(required | optional) or not required.issubset(observation):
         raise ValueError("invalid rejected observation envelope")
     if observation.get("passed") is not False or observation.get("arms") != {}:
         raise ValueError("invalid rejected observation state")
@@ -776,6 +947,12 @@ def _validate_rejected_envelope(observation: Mapping[str, Any]) -> dict[str, Any
     retained["failure_type"] = failure_type
     retained["failure_phase"] = failure_phase
     retained["failure_timeout_origin"] = origin
+    attempt = observation.get("failure_attempt")
+    if attempt is not None and (
+        failure_type != "TimeoutError" or origin != "benchmark_call_deadline"
+    ):
+        raise ValueError("terminal attempt requires the outer benchmark deadline")
+    retained["failure_attempt"] = None if attempt is None else _validate_failure_attempt(attempt)
     return retained
 
 
@@ -1222,6 +1399,7 @@ async def _bounded_call(
     *,
     executor: Executor | None = None,
     timeout_seconds: float | None = None,
+    on_timeout: Callable[[], tuple[dict[str, float | None], bool] | None] | None = None,
 ) -> Any:
     """Run one native call away from the event loop under an absolute bound."""
 
@@ -1239,7 +1417,18 @@ async def _bounded_call(
     try:
         return await asyncio.wait_for(asyncio.shield(future), timeout=timeout_seconds)
     except TimeoutError:
-        raise _ProbeFailure("TimeoutError", timeout_origin="benchmark_call_deadline") from None
+        failure = _ProbeFailure("TimeoutError", timeout_origin="benchmark_call_deadline")
+        if on_timeout is not None:
+            try:
+                snapshot = on_timeout()
+            except BaseException:
+                snapshot = None
+            if snapshot is not None:
+                scheduler, complete = snapshot
+                failure.scheduler = dict(scheduler)
+                failure.scheduler_complete = complete
+                failure.measurement_state = "in_flight"
+        raise failure from None
 
 
 async def _capture_call(
@@ -1251,59 +1440,69 @@ async def _capture_call(
     sequence: int,
     position: int,
     arm: str,
+    phase: str = "measured_capture",
 ) -> dict[str, Any]:
     submitted_ns = perf_counter_ns()
-    entered_ns = 0
+    evidence = _CaptureEvidence(
+        arm=arm,
+        xvfb_pid=xvfb_pid,
+    )
 
     def call() -> tuple[int, bytes, NativeCaptureTiming, dict[str, float | None]]:
-        nonlocal entered_ns
+        evidence.capture_tid = get_native_id()
         entered_ns = perf_counter_ns()
-        capture_tid = get_native_id()
-        thread_cpu_before = thread_time_ns()
-        thread_sched_before = _optional_schedstat(os.getpid(), tid=capture_tid)
-        worker_pid = _spawned_worker_pid(session) if arm == SPAWNED_ARM else None
-        worker_before = _process_counters(worker_pid)
-        xvfb_before = _process_counters(xvfb_pid)
-        data, timing = session.capture_png_with_timing(**REGION)
-        xvfb_after = _process_counters(xvfb_pid)
-        worker_after = _process_counters(worker_pid)
-        thread_sched_after = _optional_schedstat(os.getpid(), tid=capture_tid)
-        thread_cpu_after = thread_time_ns()
+        evidence.thread_cpu_before_ns = thread_time_ns()
+        evidence.thread_sched_before = _optional_schedstat(
+            os.getpid(), tid=evidence.capture_tid
+        )
+        evidence.worker_pid = _spawned_worker_pid(session) if arm == SPAWNED_ARM else None
+        evidence.worker_before = _process_counters(evidence.worker_pid)
+        evidence.xvfb_before = _process_counters(xvfb_pid)
+        try:
+            data, timing = session.capture_png_with_timing(**REGION)
+        except BaseException as exc:
+            scheduler = evidence.finish()
+            exc.__dict__["_benchmark_scheduler"] = dict(scheduler)
+            exc.__dict__["_benchmark_scheduler_complete"] = True
+            exc.__dict__["_benchmark_measurement_state"] = "exception"
+            raise
+        scheduler = evidence.finish()
         if not isinstance(data, bytes) or not 0 < len(data) <= 64 * 1024**2:
             raise ScreenshotCaptureFailed("capture returned an invalid payload")
         if not isinstance(timing, NativeCaptureTiming):
             raise ScreenshotCaptureFailed("capture returned invalid timing")
-        scheduler = {
-            "capture_thread_cpu_ms": (thread_cpu_after - thread_cpu_before) / 1_000_000,
-            "capture_thread_runtime_ms": _counter_delta(
-                None if thread_sched_after is None else thread_sched_after[0],
-                None if thread_sched_before is None else thread_sched_before[0],
-            ),
-            "capture_thread_runqueue_wait_ms": _counter_delta(
-                None if thread_sched_after is None else thread_sched_after[1],
-                None if thread_sched_before is None else thread_sched_before[1],
-            ),
-            "worker_process_cpu_ms": _counter_delta(
-                worker_after.cpu_ns, worker_before.cpu_ns
-            ),
-            "worker_runtime_ms": _counter_delta(
-                worker_after.runtime_ns, worker_before.runtime_ns
-            ),
-            "worker_runqueue_wait_ms": _counter_delta(
-                worker_after.runqueue_wait_ns, worker_before.runqueue_wait_ns
-            ),
-            "xvfb_process_cpu_ms": _counter_delta(xvfb_after.cpu_ns, xvfb_before.cpu_ns),
-            "xvfb_runtime_ms": _counter_delta(
-                xvfb_after.runtime_ns, xvfb_before.runtime_ns
-            ),
-            "xvfb_runqueue_wait_ms": _counter_delta(
-                xvfb_after.runqueue_wait_ns, xvfb_before.runqueue_wait_ns
-            ),
-        }
         return entered_ns, data, timing, scheduler
 
     resumed_ns = 0
-    entered_ns, data, timing, scheduler = await _bounded_call(call, executor=executor)
+    try:
+        entered_ns, data, timing, scheduler = await _bounded_call(
+            call,
+            executor=executor,
+            on_timeout=lambda: (evidence.snapshot_in_flight(), False),
+        )
+    except BaseException as exc:
+        scheduler = getattr(exc, "scheduler", None) or getattr(
+            exc, "_benchmark_scheduler", {}
+        )
+        exc.__dict__["_benchmark_failure_attempt"] = {
+            "arm": arm,
+            "pair_index": pair_index,
+            "phase": phase,
+            "scheduler": dict(scheduler),
+            "scheduler_complete": bool(
+                getattr(
+                    exc,
+                    "scheduler_complete",
+                    getattr(exc, "_benchmark_scheduler_complete", False),
+                )
+            ),
+            "measurement_state": getattr(
+                exc,
+                "measurement_state",
+                getattr(exc, "_benchmark_measurement_state", "exception"),
+            ),
+        }
+        raise
     resumed_ns = perf_counter_ns()
     pixel_hash = _decode_rgb_pixel_hash(data)
     sample = _CaptureSample(
@@ -1348,12 +1547,26 @@ def _failure_record(
     phase: str,
 ) -> dict[str, Any]:
     failure_type, timeout_origin = _classify_failure(exc, arm=arm)
-    return {
+    retained: dict[str, Any] = {
         "pair_index": pair_index,
         "phase": phase,
         "failure_type": failure_type,
         "timeout_origin": timeout_origin,
     }
+    scheduler = getattr(exc, "_benchmark_scheduler", None)
+    if scheduler is None:
+        scheduler = getattr(exc, "scheduler", None)
+    measurement_state = getattr(exc, "_benchmark_measurement_state", None)
+    if measurement_state is None:
+        measurement_state = getattr(exc, "measurement_state", None)
+    scheduler_complete = getattr(exc, "_benchmark_scheduler_complete", None)
+    if scheduler_complete is None:
+        scheduler_complete = getattr(exc, "scheduler_complete", None)
+    if isinstance(scheduler, Mapping) and isinstance(measurement_state, str):
+        retained["scheduler"] = dict(scheduler)
+        retained["scheduler_complete"] = scheduler_complete
+        retained["measurement_state"] = measurement_state
+    return retained
 
 
 async def _close_one(session: Any, *, executor: Executor) -> None:
@@ -1448,6 +1661,7 @@ async def _run_child_inner(
                         sequence=warmup_index * 2 + position,
                         position=position,
                         arm=arm,
+                        phase="warmup_capture",
                     )
                 except BaseException as exc:
                     if _is_terminal_deadline(exc):
@@ -1480,6 +1694,7 @@ async def _run_child_inner(
                         sequence=pair_index * 2 + position,
                         position=position,
                         arm=arm,
+                        phase="measured_capture",
                     )
                 except BaseException as exc:
                     if _is_terminal_deadline(exc):
@@ -1608,6 +1823,15 @@ async def _run_child(*, pairs: int, warmups: int, progress: _Progress) -> dict[s
         if isinstance(exc, _TargetPreflightFailure):
             progress.phase = exc.phase
         failure_type, timeout_origin = _classify_failure(exc, arm=DIRECT_ARM)
+        attempt = getattr(exc, "_benchmark_failure_attempt", None)
+        attempt_phase = attempt.get("phase") if isinstance(attempt, Mapping) else None
+        failure_phase = (
+            attempt_phase
+            if attempt_phase in SAFE_FAILURE_PHASES
+            else progress.phase
+            if progress.phase in SAFE_FAILURE_PHASES
+            else "summary"
+        )
         result: dict[str, Any] = {
             "passed": False,
             **SCOPE_CONTRACT,
@@ -1623,8 +1847,10 @@ async def _run_child(*, pairs: int, warmups: int, progress: _Progress) -> dict[s
             "retries": 0,
             "replacement_samples": 0,
             "failure_type": failure_type,
-            "failure_phase": progress.phase if progress.phase in SAFE_FAILURE_PHASES else "summary",
+            "failure_phase": failure_phase,
         }
+        if isinstance(attempt, Mapping):
+            result["failure_attempt"] = dict(attempt)
         if timeout_origin is not None:
             result["failure_timeout_origin"] = timeout_origin
         return result
@@ -1984,6 +2210,7 @@ def _build_artifact_impl(
         "replacement_samples": 0,
         "failure_type": failure_type,
         "failure_timeout_origin": failure_origin,
+        "failure_attempt": retained.get("failure_attempt"),
         "failure_phase": (
             "artifact_validation"
             if validation_failed

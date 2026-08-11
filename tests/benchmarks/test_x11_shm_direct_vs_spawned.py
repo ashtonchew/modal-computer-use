@@ -530,7 +530,7 @@ def test_artifact_accepts_explicit_unavailable_cgroup_evidence() -> None:
     assert artifact["target_identity"]["period_usec"] is None
     assert artifact["target_identity"]["memory_bytes"] is None
     assert artifact["cgroup_scope"] == "configured-resource-only"
-    assert artifact["schema_version"] == "x11-shm-direct-vs-spawned.v4"
+    assert artifact["schema_version"] == "x11-shm-direct-vs-spawned.v5"
 
 
 @pytest.mark.parametrize(
@@ -940,4 +940,259 @@ def test_outer_benchmark_deadline_is_terminal_and_drops_survivor_rows(monkeypatc
 
     assert result["failure_type"] == "TimeoutError"
     assert result["failure_timeout_origin"] == "benchmark_call_deadline"
+    assert result["failure_phase"] == "measured_capture"
     assert result["arms"] == {}
+    assert result["failure_attempt"]["arm"] == probe.DIRECT_ARM
+    assert result["failure_attempt"]["pair_index"] == 0
+    assert result["failure_attempt"]["measurement_state"] == "in_flight"
+    assert result["failure_attempt"]["scheduler_complete"] is False
+    assert set(result["failure_attempt"]["scheduler"]) == set(probe._SCHEDULER_FIELDS)
+
+
+def test_capture_call_retains_scheduler_evidence_for_typed_native_timeout(monkeypatch) -> None:
+    scheduler_before_after = iter([(100, 11), (450, 71)])
+    thread_cpu_before_after = iter([1_000_000, 4_000_000])
+
+    class NativeTimeoutSession:
+        def capture_png_with_timing(self, **_kwargs: object) -> object:
+            raise probe._DirectNativeTimeout(
+                "private timeout", timeout_origin="native_x11_reply_deadline"
+            )
+
+    monkeypatch.setattr(
+        probe,
+        "_optional_schedstat",
+        lambda _pid, *, tid=None: next(scheduler_before_after) if tid is not None else None,
+    )
+    monkeypatch.setattr(probe, "thread_time_ns", lambda: next(thread_cpu_before_after))
+
+    executor = probe.ThreadPoolExecutor(max_workers=1)
+    try:
+        with pytest.raises(probe._DirectNativeTimeout) as raised:
+            asyncio.run(
+                probe._capture_call(
+                    NativeTimeoutSession(),
+                    executor=executor,
+                    xvfb_pid=None,
+                    pair_index=0,
+                    sequence=0,
+                    position=0,
+                    arm=probe.DIRECT_ARM,
+                )
+            )
+    finally:
+        executor.shutdown(wait=True)
+
+    failure = probe._failure_record(
+        raised.value,
+        arm=probe.DIRECT_ARM,
+        pair_index=0,
+        phase="measured_capture",
+    )
+    assert failure["scheduler"] == {
+        "capture_thread_cpu_ms": 3.0,
+        "capture_thread_runtime_ms": 0.00035,
+        "capture_thread_runqueue_wait_ms": 0.00006,
+        "worker_process_cpu_ms": None,
+        "worker_runtime_ms": None,
+        "worker_runqueue_wait_ms": None,
+        "xvfb_process_cpu_ms": None,
+        "xvfb_runtime_ms": None,
+        "xvfb_runqueue_wait_ms": None,
+    }
+    assert failure["scheduler_complete"] is True
+    assert failure["measurement_state"] == "exception"
+
+
+def test_capture_call_retains_inflight_scheduler_evidence_on_deadline(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    scheduler_before_after = iter([(100, 11), (450, 71)])
+    thread_cpu_before_after = iter([1_000_000])
+
+    class HungSession:
+        def capture_png_with_timing(self, **_kwargs: object) -> object:
+            entered.set()
+            release.wait()
+            return _png_bytes(), _timing()
+
+    monkeypatch.setattr(
+        probe,
+        "_optional_schedstat",
+        lambda _pid, *, tid=None: next(scheduler_before_after) if tid is not None else None,
+    )
+    monkeypatch.setattr(probe, "thread_time_ns", lambda: next(thread_cpu_before_after))
+    monkeypatch.setattr(probe, "OPERATION_TIMEOUT_SECONDS", 0.01)
+
+    executor = probe.ThreadPoolExecutor(max_workers=1)
+    try:
+        with pytest.raises(probe._ProbeFailure) as raised:
+            asyncio.run(
+                probe._capture_call(
+                    HungSession(),
+                    executor=executor,
+                    xvfb_pid=None,
+                    pair_index=0,
+                    sequence=0,
+                    position=0,
+                    arm=probe.DIRECT_ARM,
+                    phase="warmup_capture",
+                )
+            )
+        assert entered.wait(0.2)
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+
+    failure = probe._failure_record(
+        raised.value,
+        arm=probe.DIRECT_ARM,
+        pair_index=0,
+        phase="measured_capture",
+    )
+    assert failure["timeout_origin"] == "benchmark_call_deadline"
+    assert failure["scheduler"]["capture_thread_runtime_ms"] == 0.00035
+    assert failure["scheduler"]["capture_thread_runqueue_wait_ms"] == 0.00006
+    assert failure["scheduler"]["capture_thread_cpu_ms"] is None
+    assert failure["scheduler_complete"] is False
+    assert failure["measurement_state"] == "in_flight"
+    assert raised.value._benchmark_failure_attempt["phase"] == "warmup_capture"
+
+
+def test_queued_deadline_does_not_mislabel_process_schedstat_as_capture_thread(
+    monkeypatch,
+) -> None:
+    release = threading.Event()
+    monkeypatch.setattr(probe, "OPERATION_TIMEOUT_SECONDS", 0.01)
+
+    def schedstat(_pid: int, *, tid: int | None = None):
+        assert tid is not None
+        return (100, 10)
+
+    monkeypatch.setattr(probe, "_optional_schedstat", schedstat)
+    executor = probe.ThreadPoolExecutor(max_workers=1)
+    blocker = executor.submit(release.wait)
+    try:
+        with pytest.raises(probe._ProbeFailure) as raised:
+            asyncio.run(
+                probe._capture_call(
+                    SimpleNamespace(capture_png_with_timing=pytest.fail),
+                    executor=executor,
+                    xvfb_pid=None,
+                    pair_index=0,
+                    sequence=0,
+                    position=0,
+                    arm=probe.DIRECT_ARM,
+                )
+            )
+    finally:
+        release.set()
+        blocker.result(timeout=1)
+        executor.shutdown(wait=True)
+
+    scheduler = raised.value._benchmark_failure_attempt["scheduler"]
+    assert scheduler["capture_thread_cpu_ms"] is None
+    assert scheduler["capture_thread_runtime_ms"] is None
+    assert scheduler["capture_thread_runqueue_wait_ms"] is None
+
+
+def test_artifact_retains_scheduler_evidence_on_timeout_failure() -> None:
+    observation = _observation(passed=False)
+    observation["paired_prefix_samples"] = 2
+    observation["unpaired_after_failure_samples"] = probe.PAIRS - 2
+    observation["first_unpaired_pair"] = 2
+    observation["captures_completed"] = {
+        "direct_native": 2,
+        "spawned_worker": probe.PAIRS,
+    }
+    observation["arms"]["direct_native"]["observations"] = observation["arms"][
+        "direct_native"
+    ]["observations"][:2]
+    scheduler = _scheduler_row(direct=True)
+    observation["arms"]["direct_native"]["failure"] = {
+        "pair_index": 2,
+        "phase": "measured_capture",
+        "failure_type": "X11ScreenshotTimeoutError",
+        "timeout_origin": "native_x11_reply_deadline",
+        "scheduler": scheduler,
+        "scheduler_complete": True,
+        "measurement_state": "exception",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["arms"]["direct_native"]["failure"]["scheduler"] == scheduler
+    assert artifact["arms"]["direct_native"]["failure"]["scheduler_complete"] is True
+
+
+def test_artifact_rejects_invalid_timeout_scheduler_evidence() -> None:
+    observation = _observation(passed=False)
+    observation["paired_prefix_samples"] = 2
+    observation["unpaired_after_failure_samples"] = probe.PAIRS - 2
+    observation["first_unpaired_pair"] = 2
+    observation["captures_completed"] = {
+        "direct_native": 2,
+        "spawned_worker": probe.PAIRS,
+    }
+    observation["arms"]["direct_native"]["observations"] = observation["arms"][
+        "direct_native"
+    ]["observations"][:2]
+    observation["arms"]["direct_native"]["failure"] = {
+        "pair_index": 2,
+        "phase": "measured_capture",
+        "failure_type": "X11ScreenshotTimeoutError",
+        "timeout_origin": "native_x11_reply_deadline",
+        "scheduler": {
+            **_scheduler_row(direct=True),
+            "capture_thread_cpu_ms": -1.0,
+        },
+        "scheduler_complete": True,
+        "measurement_state": "exception",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+    assert artifact["arms"] == {}
+
+
+def test_rejected_envelope_rejects_completed_outer_deadline_attempt() -> None:
+    observation = probe.empty_rejected_observation("measured_capture")
+    observation["failure_type"] = "TimeoutError"
+    observation["failure_timeout_origin"] = "benchmark_call_deadline"
+    observation["failure_attempt"] = {
+        "arm": probe.DIRECT_ARM,
+        "pair_index": 0,
+        "phase": "measured_capture",
+        "scheduler": _scheduler_row(direct=True),
+        "scheduler_complete": True,
+        "measurement_state": "exception",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+    assert artifact["failure_attempt"] is None
+
+
+def test_rejected_envelope_rejects_inflight_capture_thread_cpu_delta() -> None:
+    observation = probe.empty_rejected_observation("measured_capture")
+    observation["failure_type"] = "TimeoutError"
+    observation["failure_timeout_origin"] = "benchmark_call_deadline"
+    observation["failure_attempt"] = {
+        "arm": probe.DIRECT_ARM,
+        "pair_index": 0,
+        "phase": "measured_capture",
+        "scheduler": _scheduler_row(direct=True),
+        "scheduler_complete": False,
+        "measurement_state": "in_flight",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+    assert artifact["failure_attempt"] is None

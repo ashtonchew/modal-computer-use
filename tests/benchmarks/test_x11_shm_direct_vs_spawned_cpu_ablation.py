@@ -80,6 +80,7 @@ def test_cpu_ablation_contract_has_two_exact_resource_runs(monkeypatch) -> None:
         runs,
         fixture_identity="f" * 64,
         source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_2"],
     )
 
     assert artifact["status"] == "complete"
@@ -90,6 +91,26 @@ def test_cpu_ablation_contract_has_two_exact_resource_runs(monkeypatch) -> None:
         "cpu_2": {"cpu": 2.0, "memory_bytes": 2048 * 1024**2},
     }
     assert [cpu for cpu, _ in calls] == [1.0, 2.0]
+    assert artifact["execution_order"] == ["cpu_1", "cpu_2"]
+
+
+def test_cpu_ablation_rejects_invalid_execution_order(monkeypatch) -> None:
+    monkeypatch.setattr(
+        probe._base,
+        "build_artifact",
+        lambda *_args, **_kwargs: pytest.fail("invalid order must fail before child validation"),
+    )
+    runs = {label: _run(cpu=resources["cpu"]) for label, resources in probe.CPU_RUNS.items()}
+
+    artifact = probe.build_artifact(
+        runs,
+        fixture_identity="f" * 64,
+        source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_1"],
+    )
+
+    assert artifact["status"] == "rejected"
+    assert artifact["execution_order"] is None
 
 
 def test_cpu_ablation_rejects_wrong_child_resource_claim(monkeypatch) -> None:
@@ -105,6 +126,7 @@ def test_cpu_ablation_rejects_wrong_child_resource_claim(monkeypatch) -> None:
         runs,
         fixture_identity="f" * 64,
         source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_2"],
     )
 
     assert artifact["status"] == "rejected"
@@ -156,6 +178,7 @@ def test_cpu_ablation_rejects_mismatched_source_identity(monkeypatch) -> None:
         runs,
         fixture_identity="f" * 64,
         source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_2"],
     )
 
     assert artifact["status"] == "rejected"
@@ -198,6 +221,7 @@ def test_cpu_ablation_marks_missing_cgroup_attribution_exploratory(monkeypatch) 
         runs,
         fixture_identity="f" * 64,
         source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_2"],
     )
 
     assert artifact["status"] == "exploratory"
@@ -210,6 +234,7 @@ def test_cpu_ablation_marks_missing_cgroup_attribution_exploratory(monkeypatch) 
         runs,
         fixture_identity="f" * 64,
         source_identity={"module_sha256": "a" * 64, "image_object_id": "im-test"},
+        execution_order=["cpu_1", "cpu_2"],
     )
     assert duplicate_target["status"] == "rejected"
     assert duplicate_target["failure_type"] == "EvidenceValidationError"
@@ -220,6 +245,7 @@ def test_cpu_ablation_sanitizes_invalid_fixture_identity(monkeypatch) -> None:
         {},
         fixture_identity="not-a-hash",
         source_identity={},
+        execution_order=["cpu_1", "cpu_2"],
     )
 
     assert artifact["status"] == "rejected"
