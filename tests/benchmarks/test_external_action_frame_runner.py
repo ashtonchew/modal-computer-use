@@ -141,6 +141,50 @@ def test_tracked_payload_rejects_clean_claim_without_observed_inventories() -> N
     assert payload["status"] == "rejected"
 
 
+def test_tracked_payload_rejects_noncanonical_action_frame_contract() -> None:
+    runner = _load_runner()
+    compare = {
+        "providers": {
+            provider: {
+                "status": "ok",
+                "cases": {
+                    "action_to_immediate_frame": {
+                        "status": "ok",
+                        "successful_iterations": 30,
+                        "samples_ms": [1.0] * 30,
+                        "case_id": runner.ACTION_FRAME_CASE_ID,
+                        "action_semantics": "different-action",
+                        "action_payload_sha256": runner.ACTION_FRAME_ACTION_PAYLOAD_SHA256,
+                        "timer_boundary": runner.ACTION_FRAME_TIMER_BOUNDARY,
+                        "screenshot": {"format": "png", "width": 1024, "height": 768},
+                        "harness_retries": 0,
+                        "replacement_samples": 0,
+                    }
+                },
+            }
+            for provider in runner.EXTERNAL_PROVIDERS
+        }
+    }
+    clean = {
+        provider: {"status": "clean", "survivors": 0}
+        for provider in runner.EXTERNAL_PROVIDERS
+    }
+    inventories = {
+        provider: (set(), set()) for provider in runner.EXTERNAL_PROVIDERS
+    }
+
+    payload = runner.build_tracked_payload(
+        compare,
+        source_sha="a" * 40,
+        evidence_date="2026-08-11",
+        cleanup=clean,
+        inventories=inventories,
+        iterations=30,
+    )
+
+    assert payload["status"] == "rejected"
+
+
 def test_build_tracked_payload_keeps_failures_and_excludes_ids() -> None:
     runner = _load_runner()
     compare = {
@@ -157,6 +201,17 @@ def test_build_tracked_payload_keeps_failures_and_excludes_ids() -> None:
                         "successful_iterations": 2,
                         "samples_ms": [1.0, 2.0],
                         "summary_ms": {"p50": 1.5, "p95": 1.95},
+                        "case_id": runner.ACTION_FRAME_CASE_ID,
+                        "action_semantics": runner.ACTION_FRAME_SEMANTICS,
+                        "action_payload_sha256": runner.ACTION_FRAME_ACTION_PAYLOAD_SHA256,
+                        "timer_boundary": runner.ACTION_FRAME_TIMER_BOUNDARY,
+                        "screenshot": {
+                            "format": "png",
+                            "width": 1024,
+                            "height": 768,
+                        },
+                        "harness_retries": 0,
+                        "replacement_samples": 0,
                         "failures": [
                             {
                                 "case": "action_to_immediate_frame",

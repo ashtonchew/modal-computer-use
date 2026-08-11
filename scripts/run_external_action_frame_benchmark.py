@@ -29,6 +29,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import math
 import os
 import re
 import shutil
@@ -45,6 +46,9 @@ EXTERNAL_PROVIDERS = ("daytona", "e2b", "tzafon")
 ACTION_FRAME_CASE = "action_to_immediate_frame"
 ACTION_FRAME_CASE_ID = "ordered-actions-to-immediate-frame-v1"
 ACTION_FRAME_SEMANTICS = "one-left-click-at-512-384-then-immediate-full-frame"
+ACTION_FRAME_ACTION_PAYLOAD_SHA256 = (
+    "83599900ae670680c7d84271000b03114940c492d935c26b5f0999a281958296"
+)
 ACTION_FRAME_TIMER_BOUNDARY = (
     "caller_before_ordered_action_dispatch_to_validated_immediate_full_frame_bytes"
 )
@@ -462,8 +466,7 @@ def build_tracked_payload(
     all_measured = all(
         value["status"] == "ok"
         and isinstance(value["case"], Mapping)
-        and value["case"].get("status") == "ok"
-        and value["case"].get("successful_iterations") == iterations
+        and _case_matches_contract(value["case"], iterations)
         and not value["failures"]
         for value in providers.values()
     )
@@ -518,6 +521,42 @@ def _safe_case(value: Any) -> dict[str, Any]:
         "replacement_samples",
     }
     return {key: value[key] for key in allowed if key in value}
+
+
+def _case_matches_contract(case: Mapping[str, Any], iterations: int) -> bool:
+    """Gate publication on the fixed action, timer, and validated frame shape."""
+
+    screenshot = case.get("screenshot")
+    samples = case.get("samples_ms")
+    if not isinstance(screenshot, Mapping) or not isinstance(samples, list):
+        return False
+    width = screenshot.get("width")
+    height = screenshot.get("height")
+    image_format = screenshot.get("format")
+    return (
+        case.get("status") == "ok"
+        and case.get("case_id") == ACTION_FRAME_CASE_ID
+        and case.get("action_semantics") == ACTION_FRAME_SEMANTICS
+        and case.get("action_payload_sha256") == ACTION_FRAME_ACTION_PAYLOAD_SHA256
+        and case.get("timer_boundary") == ACTION_FRAME_TIMER_BOUNDARY
+        and case.get("successful_iterations") == iterations
+        and len(samples) == iterations
+        and all(
+            isinstance(sample, int | float)
+            and not isinstance(sample, bool)
+            and math.isfinite(float(sample))
+            and sample >= 0
+            for sample in samples
+        )
+        and isinstance(width, int)
+        and width > 0
+        and isinstance(height, int)
+        and height > 0
+        and isinstance(image_format, str)
+        and bool(image_format.strip())
+        and case.get("harness_retries") == 0
+        and case.get("replacement_samples") == 0
+    )
 
 
 def _safe_provider_metadata(value: Any) -> dict[str, Any]:
