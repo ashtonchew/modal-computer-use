@@ -35,6 +35,7 @@ TARGET_IDENTITY = {
     "period_usec": 100_000,
     "memory_bytes": 2048 * 1024**2,
     "cgroup_version": "v2",
+    "cgroup_resolution": "namespace-root",
     "machine": "x86_64",
     "display": ":99",
     "width": probe.WIDTH,
@@ -261,23 +262,84 @@ def test_artifact_retains_bounded_preflight_failure_envelope() -> None:
     assert artifact["failure_phase"] == "target_cgroup_limits"
 
 
-def test_runtime_limits_use_self_v2_membership_without_cpu_stat(
+def test_runtime_limits_use_namespace_v2_membership_without_cpu_stat(
     monkeypatch, tmp_path: Path
 ) -> None:
     cgroup = tmp_path / "sandbox"
     cgroup.mkdir()
     (cgroup / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
     (cgroup / "memory.max").write_text(str(2048 * 1024**2), encoding="utf-8")
-    monkeypatch.setattr(probe, "_v2_cgroup_directory", lambda: cgroup)
+    monkeypatch.setattr(
+        probe,
+        "_v2_cgroup_directory",
+        lambda: (cgroup, "namespace-root"),
+    )
 
-    assert probe._runtime_limits() == (100_000, 100_000, 2048 * 1024**2)
+    assert probe._runtime_limits() == (
+        100_000,
+        100_000,
+        2048 * 1024**2,
+        "namespace-root",
+    )
 
 
 def test_v2_cgroup_directory_parses_root_and_nested_memberships(tmp_path: Path) -> None:
-    assert probe._v2_cgroup_directory("0::/\n", root=tmp_path) == tmp_path
-    assert probe._v2_cgroup_directory("0::/sandbox/child\n", root=tmp_path) == (
-        tmp_path / "sandbox" / "child"
+    root_mount = f"24 23 0:22 / {tmp_path} rw - cgroup2 cgroup rw\n"
+    assert probe._v2_cgroup_directory("0::/\n", mountinfo_text=root_mount, root=tmp_path) == (
+        tmp_path,
+        "namespace-root",
     )
+    assert probe._v2_cgroup_directory(
+        "0::/sandbox/child\n",
+        mountinfo_text=root_mount,
+        root=tmp_path,
+    ) == (
+        tmp_path / "sandbox" / "child",
+        "namespace-relative",
+    )
+    namespace_mount = f"24 23 0:22 /host/sandbox/child {tmp_path} rw - cgroup2 cgroup rw\n"
+    assert probe._v2_cgroup_directory(
+        "0::/\n",
+        mountinfo_text=namespace_mount,
+        root=tmp_path,
+    ) == (tmp_path, "namespace-root")
+    assert probe._v2_cgroup_directory(
+        "0::/nested\n",
+        mountinfo_text=namespace_mount,
+        root=tmp_path,
+    ) == (tmp_path / "nested", "namespace-relative")
+
+
+@pytest.mark.parametrize(
+    ("cpu_text", "memory_text", "expected_phase"),
+    [
+        (None, str(2048 * 1024**2), "target_cpu_limit"),
+        ("max 100000", str(2048 * 1024**2), "target_cpu_limit"),
+        ("100000 100000", None, "target_memory_limit"),
+        ("100000 100000", "max", "target_memory_limit"),
+        ("100000 200000", str(2048 * 1024**2), "target_limit_contract"),
+        ("100000 100000", str(1024 * 1024**2), "target_limit_contract"),
+    ],
+)
+def test_runtime_limits_report_bounded_preflight_phase(
+    monkeypatch,
+    tmp_path: Path,
+    cpu_text: str | None,
+    memory_text: str | None,
+    expected_phase: str,
+) -> None:
+    cgroup = tmp_path / "sandbox"
+    cgroup.mkdir()
+    if cpu_text is not None:
+        (cgroup / "cpu.max").write_text(cpu_text, encoding="utf-8")
+    if memory_text is not None:
+        (cgroup / "memory.max").write_text(memory_text, encoding="utf-8")
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", lambda: (cgroup, "namespace-root"))
+
+    with pytest.raises(probe._TargetPreflightFailure) as exc_info:
+        probe._runtime_limits()
+
+    assert exc_info.value.phase == expected_phase
 
 
 def test_v2_cgroup_directory_rejects_ambiguous_or_unsafe_memberships(tmp_path: Path) -> None:
@@ -287,7 +349,32 @@ def test_v2_cgroup_directory_rejects_ambiguous_or_unsafe_memberships(tmp_path: P
         "0::/../sibling\n",
     ):
         with pytest.raises(RuntimeError):
-            probe._v2_cgroup_directory(membership, root=tmp_path)
+            probe._v2_cgroup_directory(
+                membership,
+                mountinfo_text=f"24 23 0:22 / {tmp_path} rw - cgroup2 cgroup rw\n",
+                root=tmp_path,
+            )
+
+
+def test_artifact_rejects_unknown_cgroup_resolution() -> None:
+    observation = _observation()
+    observation["target_identity"] = {
+        **TARGET_IDENTITY,
+        "cgroup_resolution": "parent-fallback",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+
+
+def test_spawned_worker_identity_rejects_different_cgroup(monkeypatch) -> None:
+    session = SimpleNamespace(_session=SimpleNamespace(_process=SimpleNamespace(pid=99)))
+    monkeypatch.setattr(probe, "_same_cgroup", lambda _pid: False)
+
+    with pytest.raises(RuntimeError, match="cgroup differs"):
+        probe._spawned_worker_identity(session)
 
 
 def test_artifact_rejects_nonpositive_process_identity_and_boolean_cpu() -> None:
