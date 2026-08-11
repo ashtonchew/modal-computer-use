@@ -595,6 +595,8 @@ def test_stage_attribution_runs_one_private_same_sandbox_child() -> None:
         "module_sha256": "a" * 64,
         "image_object_id": "im-test",
         "cpu": 1.0,
+        "quota_usec": 100_000,
+        "period_usec": 100_000,
         "memory_bytes": 2048 * 1024**2,
         "machine": "x86_64",
     }

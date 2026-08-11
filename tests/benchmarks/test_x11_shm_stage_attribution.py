@@ -60,12 +60,15 @@ def _observation() -> dict[str, object]:
             "module_sha256": "d" * 64,
             "image_object_id": "im-test",
             "cpu": 1.0,
+            "quota_usec": 100_000,
+            "period_usec": 100_000,
             "memory_bytes": 2048 * 1024**2,
             "machine": "x86_64",
         },
         "worker_identity_before": {"pid": 7, "starttime_ticks": 11},
         "worker_identity_after": {"pid": 7, "starttime_ticks": 11},
         "worker_cgroup_same": True,
+        "cgroup_available": True,
         "cgroup_version": "v1",
         "cpu_max": {"quota_usec": 100_000, "period_usec": 100_000},
         "cgroup_cpu_stat_before": {field: 0 for field in stage.CGROUP_FIELDS},
@@ -194,17 +197,103 @@ def test_hybrid_cgroup_probe_selects_available_v1_cpu_files(tmp_path: Path) -> N
     assert source == stage._CpuCgroupSource("v1", cpu_directory, usage_file)
 
 
-def test_stage_child_retains_safe_preflight_failure_phase(monkeypatch) -> None:
+def test_stage_child_continues_when_cgroup_counters_are_unavailable(monkeypatch) -> None:
     def fail_cgroup_directory() -> None:
-        raise RuntimeError("private target detail")
+        raise stage._CgroupEvidenceUnavailable("private target detail")
 
     monkeypatch.setattr(stage, "_cgroup_source", fail_cgroup_directory)
+    monkeypatch.setattr(
+        stage.importlib,
+        "import_module",
+        lambda _: (_ for _ in ()).throw(ModuleNotFoundError()),
+    )
 
     result = stage.run_child()
 
     assert result["passed"] is False
+    assert result["failure_type"] == "ModuleNotFoundError"
+    assert result["failure_phase"] == "native_import"
+
+
+def test_stage_child_does_not_downgrade_invalid_cpu_quota(monkeypatch) -> None:
+    monkeypatch.setattr(
+        stage,
+        "_cgroup_source",
+        lambda: stage._CpuCgroupSource("v1", Path("/unused"), None),
+    )
+    monkeypatch.setattr(
+        stage,
+        "_cpu_max",
+        lambda _: (_ for _ in ()).throw(RuntimeError("invalid quota")),
+    )
+
+    result = stage.run_child()
+
     assert result["failure_type"] == "RuntimeError"
-    assert result["failure_phase"] == "cgroup_directory"
+    assert result["failure_phase"] == "cpu_limit"
+
+
+def test_unavailable_cgroup_evidence_requires_explicit_null_fields() -> None:
+    observation = _observation()
+    observation.update(
+        {
+            "cgroup_available": False,
+            "worker_cgroup_same": None,
+            "cgroup_version": None,
+            "cpu_max": None,
+            "cgroup_cpu_stat_before": None,
+            "cgroup_cpu_stat_after": None,
+            "cgroup_cpu_stat_delta": None,
+        }
+    )
+    for row in observation["tail_schedule"]:
+        for field in stage.CGROUP_FIELDS:
+            row[f"cgroup_{field}_delta"] = None
+    observation.pop("cpu_max")
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+
+
+def test_unavailable_cgroup_tail_requires_explicit_null_fields() -> None:
+    observation = _observation()
+    observation.update(
+        {
+            "cgroup_available": False,
+            "worker_cgroup_same": None,
+            "cgroup_version": None,
+            "cpu_max": None,
+            "cgroup_cpu_stat_before": None,
+            "cgroup_cpu_stat_after": None,
+            "cgroup_cpu_stat_delta": None,
+        }
+    )
+    for row in observation["tail_schedule"]:
+        for field in stage.CGROUP_FIELDS:
+            row[f"cgroup_{field}_delta"] = None
+    observation["tail_schedule"][0].pop("cgroup_usage_usec_delta")
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+
+
+def test_target_identity_requires_exact_integer_cpu_quota() -> None:
+    observation = _observation()
+    observation["target_identity"] = {
+        **observation["target_identity"],
+        "cpu": 1.0,
+        "quota_usec": 100_001,
+        "period_usec": 100_000,
+    }
+
+    artifact = stage.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
 
 
 def test_stage_child_retains_first_capture_failure_phase(monkeypatch) -> None:
@@ -286,6 +375,60 @@ def test_complete_stage_artifact_requires_fixed_safe_contract() -> None:
         return set()
 
     assert not keys(artifact) & forbidden
+
+
+def test_complete_stage_artifact_can_disclose_unavailable_cgroup_counters() -> None:
+    observation = _observation()
+    observation.update(
+        {
+            "cgroup_available": False,
+            "worker_cgroup_same": None,
+            "cgroup_version": None,
+            "cpu_max": None,
+            "cgroup_cpu_stat_before": None,
+            "cgroup_cpu_stat_after": None,
+            "cgroup_cpu_stat_delta": None,
+        }
+    )
+    for row in observation["tail_schedule"]:
+        for field in stage.CGROUP_FIELDS:
+            row[f"cgroup_{field}_delta"] = None
+
+    artifact = stage.build_artifact(
+        observation,
+        TERMINAL_CLEANUP,
+        PROVENANCE,
+    )
+
+    assert artifact["passed"] is True
+    assert artifact["cgroup_available"] is False
+    assert artifact["cgroup_version"] is None
+    assert artifact["cgroup_cpu_stat_delta"] is None
+    assert artifact["schema_version"] == "x11-shm-stage-attribution.v2"
+
+
+def test_stage_artifact_rejects_mixed_unavailable_cgroup_evidence() -> None:
+    observation = _observation()
+    observation.update(
+        {
+            "cgroup_available": False,
+            "worker_cgroup_same": None,
+            "cgroup_version": None,
+            "cpu_max": None,
+            "cgroup_cpu_stat_before": None,
+            "cgroup_cpu_stat_after": None,
+            "cgroup_cpu_stat_delta": {field: 0 for field in stage.CGROUP_FIELDS},
+        }
+    )
+
+    artifact = stage.build_artifact(
+        observation,
+        TERMINAL_CLEANUP,
+        PROVENANCE,
+    )
+
+    assert artifact["passed"] is False
+    assert artifact["failure_type"] == "EvidenceValidationError"
 
 
 def test_stage_artifact_rejects_malformed_tail_owner() -> None:
