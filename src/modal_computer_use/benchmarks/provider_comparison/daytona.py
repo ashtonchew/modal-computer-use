@@ -18,6 +18,7 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_base_url
+from .action_frame import ACTION_FRAME_CASE_ID
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -46,7 +47,9 @@ from .verification import (
 )
 
 
-def run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
+def run_daytona_provider(
+    *, iterations: int, warmup_iterations: int, benchmark_case: str = "all"
+) -> dict[str, Any]:
     provider = "daytona"
     api_key = os.environ.get("DAYTONA_API_KEY")
     if not api_key:
@@ -104,6 +107,7 @@ def run_daytona_provider(*, iterations: int, warmup_iterations: int) -> dict[str
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
+        benchmark_case=benchmark_case,
     )
 
 
@@ -202,6 +206,27 @@ class DaytonaDriver:
         for action in COORDINATE_CLICK_SEQUENCE_ACTIONS:
             call_first_available(mouse, ("click", "left_click"), action["x"], action["y"])
         return _coordinate_click_sequence_result()
+
+    def action_to_immediate_frame(self, sandbox: Any) -> dict[str, Any]:
+        mouse = provider_computer_use(sandbox).mouse
+        call_first_available(mouse, ("click", "left_click"), 512, 384)
+        actions = {
+            "semantic": "coordinate_click",
+            "benchmark_semantics": "one-left-click-at-512-384-v1",
+            "logical_action_count": 1,
+            "provider_action_count": 1,
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 1,
+            "request_count_source": "harness_direct",
+            "native_batch": False,
+            "batching": "single_request",
+        }
+        screenshot = self.screenshot_full(sandbox)
+        return {
+            "path": "provider-sdk-action-then-screenshot",
+            "actions": {"case_id": ACTION_FRAME_CASE_ID, **actions},
+            "screenshot": {**screenshot["payload"], "show_cursor": None},
+        }
 
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         keyboard = provider_computer_use(sandbox).keyboard

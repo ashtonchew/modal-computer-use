@@ -19,6 +19,7 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
+from .action_frame import ACTION_FRAME_CASE_ID
 from .live import run_product_provider_cases, wait_for_provider_screenshot_ready
 from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
@@ -78,7 +79,9 @@ _X11_CURSOR_READBACK_SCRIPT = (
 )
 
 
-def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
+def run_tzafon_provider(
+    *, iterations: int, warmup_iterations: int, benchmark_case: str = "all"
+) -> dict[str, Any]:
     provider = "tzafon"
     api_key = os.environ.get("TZAFON_API_KEY")
     if not api_key:
@@ -139,6 +142,7 @@ def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str,
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
+        benchmark_case=benchmark_case,
     )
 
 
@@ -269,6 +273,27 @@ class TzafonDriver:
             "request_count_source": "harness_direct",
             "native_batch": True,
             "batching": "single_request",
+        }
+
+    def action_to_immediate_frame(self, computer: Any) -> dict[str, Any]:
+        result = self._client.computers.click(_computer_id(computer), x=512, y=384)
+        _ensure_action_succeeded(result)
+        actions = {
+            "semantic": "coordinate_click",
+            "benchmark_semantics": "one-left-click-at-512-384-v1",
+            "logical_action_count": 1,
+            "provider_action_count": 1,
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 1,
+            "request_count_source": "harness_direct",
+            "native_batch": False,
+            "batching": "single_request",
+        }
+        screenshot = self.screenshot_full(computer)
+        return {
+            "path": "provider-sdk-action-then-screenshot",
+            "actions": {"case_id": ACTION_FRAME_CASE_ID, **actions},
+            "screenshot": {**screenshot["payload"], "show_cursor": None},
         }
 
     def type_100_chars(self, computer: Any) -> dict[str, Any]:

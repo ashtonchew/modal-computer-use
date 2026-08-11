@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from datetime import UTC, datetime
@@ -22,6 +23,13 @@ from .benchmarks import (
     run_action_batch_benchmark_mock_local,
     run_benchmark_report,
     run_benchmark_report_mock_local,
+)
+from .benchmarks.action_frame_report import (
+    ActionFrameReportError,
+    assemble_action_frame_report,
+    render_action_frame_report_json,
+    render_action_frame_report_markdown,
+    validate_action_frame_report,
 )
 from .benchmarks.billing import modal_billing_reconciliation_request
 from .benchmarks.costs import estimate_surface_cost
@@ -128,6 +136,22 @@ def main(argv: list[str] | None = None) -> int:
         "--format", choices=["markdown", "json"], default="markdown"
     )
     provider_results_parser.add_argument("--output", type=Path)
+    action_frame_report_parser = benchmark_subparsers.add_parser(
+        "action-frame-report",
+        help="validate and render a sanitized external action-to-frame artifact",
+    )
+    action_frame_report_parser.add_argument(
+        "artifact", type=Path, nargs="?", help="validated report artifact to render"
+    )
+    action_frame_report_parser.add_argument("--step-artifact", type=Path)
+    action_frame_report_parser.add_argument("--provider-artifact", type=Path)
+    action_frame_report_parser.add_argument("--cleanup-verification", type=Path)
+    action_frame_report_parser.add_argument("--source-sha")
+    action_frame_report_parser.add_argument("--evidence-date")
+    action_frame_report_parser.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown"
+    )
+    action_frame_report_parser.add_argument("--output", type=Path)
     promotion_gate_parser = benchmark_subparsers.add_parser(
         "promotion-gate",
         help="compare two sanitized default-promotion artifacts without running Modal",
@@ -380,6 +404,15 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "measured iterations per provider and case; "
             f"defaults to {DEFAULT_PROVIDER_COMPARISON_ITERATIONS}"
+        ),
+    )
+    compare_parser.add_argument(
+        "--case",
+        choices=["all", "action-to-immediate-frame"],
+        default="all",
+        help=(
+            "benchmark case to run; action-to-immediate-frame measures one fixed left click "
+            "through the next valid screenshot"
         ),
     )
     compare_parser.add_argument("--output", type=Path)
@@ -822,6 +855,8 @@ def main(argv: list[str] | None = None) -> int:
         return _benchmark_action_batch(args)
     if args.benchmark_command == "provider-results":
         return _benchmark_provider_results(args)
+    if args.benchmark_command == "action-frame-report":
+        return _benchmark_action_frame_report(args)
     if args.benchmark_command == "promotion-gate":
         return _benchmark_promotion_gate(args)
     if args.benchmark_command == "sdk":
@@ -884,6 +919,66 @@ def _benchmark_provider_results(args: argparse.Namespace) -> int:
         else:
             print(output, end="")
     except (OSError, json.JSONDecodeError, ProviderResultsError) as exc:
+        raise SystemExit(str(exc)) from exc
+    return 0
+
+
+def _benchmark_action_frame_report(args: argparse.Namespace) -> int:
+    try:
+        build_paths = (args.step_artifact, args.provider_artifact, args.cleanup_verification)
+        if any(path is not None for path in build_paths):
+            if not all(path is not None for path in build_paths):
+                raise ActionFrameReportError(
+                    "assembly requires --step-artifact, --provider-artifact, and "
+                    "--cleanup-verification"
+                )
+            if not args.source_sha or not args.evidence_date:
+                raise ActionFrameReportError(
+                    "assembly requires --source-sha and --evidence-date"
+                )
+            step_bytes = args.step_artifact.read_bytes()
+            provider_bytes = args.provider_artifact.read_bytes()
+            cleanup_bytes = args.cleanup_verification.read_bytes()
+            step_payload = json.loads(step_bytes)
+            provider_payload = json.loads(provider_bytes)
+            cleanup_payload = json.loads(cleanup_bytes)
+            if not all(
+                isinstance(item, dict)
+                for item in (step_payload, provider_payload, cleanup_payload)
+            ):
+                raise ActionFrameReportError("assembly inputs must be JSON objects")
+            payload = assemble_action_frame_report(
+                step_artifact=step_payload,
+                provider_artifact=provider_payload,
+                cleanup_verification=cleanup_payload,
+                source_sha=args.source_sha,
+                evidence_date=args.evidence_date,
+                input_artifact_digests={
+                    "step_candidate": hashlib.sha256(step_bytes).hexdigest(),
+                    "provider_compare": hashlib.sha256(provider_bytes).hexdigest(),
+                    "cleanup_verification": hashlib.sha256(cleanup_bytes).hexdigest(),
+                },
+            )
+        else:
+            if args.artifact is None:
+                raise ActionFrameReportError(
+                    "render mode requires an artifact path or assembly inputs"
+                )
+            payload = json.loads(args.artifact.read_bytes())
+            if not isinstance(payload, dict):
+                raise ActionFrameReportError("action-to-frame artifact must be a JSON object")
+        validate_action_frame_report(payload)
+        output = (
+            render_action_frame_report_markdown(payload)
+            if args.format == "markdown"
+            else render_action_frame_report_json(payload)
+        )
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(output, encoding="utf-8")
+        else:
+            print(output, end="")
+    except (OSError, json.JSONDecodeError, ActionFrameReportError) as exc:
         raise SystemExit(str(exc)) from exc
     return 0
 
@@ -1181,6 +1276,7 @@ def _benchmark_sdk_created_modal_sandbox(
 
 def _benchmark_compare(args: argparse.Namespace) -> int:
     providers = _compare_providers(args)
+    benchmark_case = getattr(args, "case", "all")
     if not args.mock_local and _has_live_external_provider(providers):
         _load_benchmark_env_file(args.env_file)
     sandbox_exec_runner = None
@@ -1202,6 +1298,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=_benchmark_environment_metadata(args),
+                benchmark_case=benchmark_case,
             )
         )
     elif args.base_url:
@@ -1216,9 +1313,23 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=_benchmark_environment_metadata(args),
+                benchmark_case=benchmark_case,
             )
         finally:
             client.close()
+    elif args.create_modal_sandbox and benchmark_case == "action-to-immediate-frame":
+        # The direct compare command cannot establish the application-owned
+        # placed Function and borrowed trajectory required by this case.  Run
+        # external arms only and report the Modal arm as not measured.
+        result = run_provider_comparison(
+            providers=providers,
+            mode="provider-live",
+            iterations=args.iterations,
+            sandbox_exec_runner=sandbox_exec_runner,
+            sandbox_exec_setup_failure=sandbox_exec_setup_failure,
+            environment_metadata=_benchmark_environment_metadata(args),
+            benchmark_case=benchmark_case,
+        )
     elif args.create_modal_sandbox:
         result = _benchmark_compare_created_modal_sandbox(
             args,
@@ -1234,6 +1345,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=_benchmark_environment_metadata(args),
+            benchmark_case=benchmark_case,
         )
     output = _json_string(result)
     if args.output is not None:
@@ -1251,6 +1363,7 @@ def _benchmark_compare_created_modal_sandbox(
     sandbox_exec_setup_failure: dict[str, Any] | None,
 ) -> dict[str, Any]:
     import time
+    benchmark_case = getattr(args, "case", "all")
 
     other_providers = [provider for provider in providers if provider != "modal-daemon"]
     precomputed_results: dict[str, dict[str, Any]] = {}
@@ -1262,6 +1375,7 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=_benchmark_environment_metadata(args),
+            benchmark_case=benchmark_case,
         )
         precomputed_results = _dict_value(precomputed.get("providers"))
 
@@ -1318,6 +1432,7 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
             precomputed_provider_results=precomputed_results,
+            benchmark_case=benchmark_case,
             modal_action_pacing_seconds=(
                 1.05 if metadata.get("action_case_pacing_ms") == 1050 else None
             ),
