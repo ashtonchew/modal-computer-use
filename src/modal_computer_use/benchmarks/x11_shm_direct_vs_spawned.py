@@ -1448,7 +1448,10 @@ def build_artifact(
             if validation_failed
             else None
             if passed
-            else _safe_label(observation.get("failure_phase"))
+            else _safe_label(
+                observation.get("failure_phase"),
+                allowed=SAFE_FAILURE_PHASES,
+            )
             or next(
                 (
                     retained["arms"][arm]["failure"]["phase"]

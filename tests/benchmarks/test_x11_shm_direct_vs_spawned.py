@@ -224,6 +224,17 @@ def test_artifact_rejects_unsafe_runtime_identity_labels() -> None:
     assert artifact["target_identity"] is None
 
 
+def test_artifact_drops_unrecognized_safe_looking_failure_phase() -> None:
+    observation = _observation(passed=False)
+    observation["failure_type"] = "RuntimeError"
+    observation["failure_phase"] = "private_error"
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_phase"] is None
+
+
 def test_artifact_rejects_nonpositive_process_identity_and_boolean_cpu() -> None:
     observation = _observation()
     observation["arms"]["direct_native"]["identity_before"] = {
