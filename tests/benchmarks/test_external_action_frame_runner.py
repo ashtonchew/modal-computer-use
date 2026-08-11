@@ -243,6 +243,7 @@ def test_build_tracked_payload_keeps_failures_and_excludes_ids() -> None:
         "survivors": 1,
     }
     assert payload["providers"]["daytona"]["source_sha"] == "a" * 40
+    assert payload["providers"]["daytona"]["case"]["source_sha"] == "a" * 40
     assert payload["cleanup"]["source_sha"] == "a" * 40
     assert payload["cleanup"]["providers"]["daytona"] == {
         "status": "survivors",

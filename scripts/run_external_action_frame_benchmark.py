@@ -423,6 +423,8 @@ def build_tracked_payload(
         cases = raw_cases if isinstance(raw_cases, Mapping) else {}
         raw_case = cases.get(ACTION_FRAME_CASE)
         case = _safe_case(raw_case)
+        if case:
+            case["source_sha"] = source_sha
         provider_failures = _safe_failures(
             provider_payload.get("failures"),
             raw_case.get("failures") if isinstance(raw_case, Mapping) else None,
