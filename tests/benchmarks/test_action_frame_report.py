@@ -217,6 +217,41 @@ def _provider_source_artifact() -> dict[str, object]:
     }
 
 
+def _tracked_provider_source_artifact() -> dict[str, object]:
+    raw = _provider_source_artifact()
+    provider = raw["providers"]["tzafon"]  # type: ignore[index]
+    case = provider["cases"]["action_to_immediate_frame"]  # type: ignore[index]
+    case["screenshot"]["show_cursor"] = None  # type: ignore[index]
+    return {
+        "schema_version": 1,
+        "benchmark": "external-provider-action-frame-run",
+        "status": "eligible",
+        "evidence_date": "2026-08-11",
+        "source_sha": SOURCE_SHA,
+        "case_id": "ordered-actions-to-immediate-frame-v1",
+        "action_semantics": "one-left-click-at-512-384-then-immediate-full-frame",
+        "timer_boundary": TIMER_BOUNDARY,
+        "warmup_iterations": 2,
+        "measured_iterations": 30,
+        "providers": {
+            "tzafon": {
+                "source_sha": SOURCE_SHA,
+                "status": "ok",
+                "failures": [],
+                "metadata": provider["metadata"],  # type: ignore[index]
+                "case": case,
+                "cleanup": {"status": "clean", "survivors": 0},
+                "inventory": {"before_count": 0, "after_count": 0},
+            }
+        },
+        "cleanup": {
+            "source_sha": SOURCE_SHA,
+            "providers": {"tzafon": {"status": "clean", "survivors": 0}},
+        },
+        "failures": [],
+    }
+
+
 def _cleanup_verification() -> dict[str, object]:
     return {
         "source_sha": SOURCE_SHA,
@@ -255,6 +290,25 @@ def test_assembler_binds_fresh_step_provider_and_cleanup_inputs() -> None:
         "availability": "unavailable",
     }
     assert len(result["arms"][0]["input_artifact_digests"]) == 3
+
+
+def test_assembler_accepts_sanitized_runner_artifact_with_unknown_cursor_policy() -> None:
+    result = assemble_action_frame_report(
+        step_artifact=_step_source_artifact(),
+        provider_artifact=_tracked_provider_source_artifact(),
+        cleanup_verification=_cleanup_verification(),
+        source_sha=SOURCE_SHA,
+        evidence_date="2026-08-11",
+        input_artifact_digests={
+            "step_candidate": "c" * 64,
+            "provider_compare": "d" * 64,
+            "cleanup_verification": "e" * 64,
+        },
+    )
+
+    assert result["arms"][1]["screenshot"]["show_cursor"] is None
+    markdown = render_action_frame_report_markdown(result)
+    assert "cursor=unknown" in markdown
 
 
 @pytest.mark.parametrize("field", ["source_sha", "cleanup_verification", "provider_artifact"])

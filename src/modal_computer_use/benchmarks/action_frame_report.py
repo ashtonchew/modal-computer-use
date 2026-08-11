@@ -301,13 +301,17 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
         resources = arm["resources"]
         shape = arm["request_shape"]
         screenshot = arm["screenshot"]
+        cursor_policy = screenshot["show_cursor"]
+        cursor_label = (
+            str(cursor_policy).lower() if isinstance(cursor_policy, bool) else "unknown"
+        )
         lines.append(
             f"| {arm['provider']} | {sdk['package']} {sdk['version']} | "
             f"{sdk['retry_policy']} | {topology['caller']} | "
             f"{topology['requested_region']} | "
             f"{topology['observed_region']} | {screenshot['format'].upper()} "
             f"{screenshot['width']}x{screenshot['height']} cursor="
-            f"{str(screenshot['show_cursor']).lower()} | {_format_cpu(resources['cpu'])} | "
+            f"{cursor_label} | {_format_cpu(resources['cpu'])} | "
             f"{_format_memory(resources['memory_mib'])} | {shape['sdk_calls']} | "
             f"{shape['transport_requests']} |"
         )
@@ -425,18 +429,26 @@ def _assemble_provider_arms(
     input_digests: list[dict[str, str]],
     cleanup_verification: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    if artifact.get("benchmark") != "provider-compare":
+    benchmark = artifact.get("benchmark")
+    tracked_runner = benchmark == "external-provider-action-frame-run"
+    if benchmark not in {"provider-compare", "external-provider-action-frame-run"}:
         raise ActionFrameReportError("provider artifact benchmark is unsupported")
-    if artifact.get("status") not in {None, "ok", "eligible"} and artifact.get("ok") is not True:
+    if tracked_runner:
+        if artifact.get("status") != "eligible" or artifact.get("failures") != []:
+            raise ActionFrameReportError("provider runner artifact is incomplete")
+    elif artifact.get("status") not in {None, "ok", "eligible"} and artifact.get("ok") is not True:
         raise ActionFrameReportError("provider artifact is incomplete")
     providers = _mapping(artifact.get("providers"), "provider artifact providers")
     arms: list[dict[str, Any]] = []
     for provider, provider_value in providers.items():
         provider_result = _mapping(provider_value, f"provider {provider}")
-        cases = _mapping(provider_result.get("cases"), f"provider {provider} cases")
-        case_value = cases.get("action_to_immediate_frame")
-        if case_value is None:
-            case_value = cases.get("action-to-immediate-frame")
+        if tracked_runner:
+            case_value = provider_result.get("case")
+        else:
+            cases = _mapping(provider_result.get("cases"), f"provider {provider} cases")
+            case_value = cases.get("action_to_immediate_frame")
+            if case_value is None:
+                case_value = cases.get("action-to-immediate-frame")
         case = _mapping(case_value, f"provider {provider} action-to-frame case")
         if case.get("status") != "ok" or provider_result.get("status") != "ok":
             raise ActionFrameReportError(f"provider {provider} action-to-frame arm is incomplete")
@@ -654,8 +666,10 @@ def _validate_screenshot(screenshot: dict[str, Any]) -> None:
         raise ActionFrameReportError("screenshot width must be a positive integer")
     if isinstance(height, bool) or not isinstance(height, int) or height <= 0:
         raise ActionFrameReportError("screenshot height must be a positive integer")
-    if not isinstance(screenshot.get("show_cursor"), bool):
-        raise ActionFrameReportError("screenshot show_cursor must be boolean")
+    if screenshot.get("show_cursor") is not None and not isinstance(
+        screenshot.get("show_cursor"), bool
+    ):
+        raise ActionFrameReportError("screenshot show_cursor must be boolean or unknown")
 
 
 def _validate_request_shape(request_shape: dict[str, Any], index: int | str) -> None:

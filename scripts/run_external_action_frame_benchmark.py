@@ -52,7 +52,7 @@ ACTION_FRAME_ACTION_PAYLOAD_SHA256 = (
 ACTION_FRAME_TIMER_BOUNDARY = (
     "caller_before_ordered_action_dispatch_to_validated_immediate_full_frame_bytes"
 )
-DEFAULT_WARMUP_ITERATIONS = 1
+DEFAULT_WARMUP_ITERATIONS = 2
 DEFAULT_ITERATIONS = 100
 DEFAULT_COMPARE_TIMEOUT_SECONDS = 3600
 ENV_KEYS = frozenset(
@@ -707,7 +707,7 @@ def run_benchmark(
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
     if warmup_iterations != DEFAULT_WARMUP_ITERATIONS:
-        raise ValueError("the compare seam uses exactly one warmup iteration")
+        raise ValueError("the compare seam uses exactly two warmup iterations")
     if not authorize:
         require_live_authorization(False)
     _ensure_outputs_available(output_path, private_output)

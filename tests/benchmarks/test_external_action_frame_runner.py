@@ -233,7 +233,7 @@ def test_build_tracked_payload_keeps_failures_and_excludes_ids() -> None:
         evidence_date="2026-08-11",
         cleanup={"daytona": {"status": "survivors", "survivors": 1}},
         iterations=3,
-        warmup_iterations=1,
+        warmup_iterations=2,
     )
     encoded = json.dumps(payload, sort_keys=True)
 
@@ -276,7 +276,7 @@ def test_run_command_uses_only_external_action_frame_providers(tmp_path) -> None
         env_file=env_file,
         output_path=tmp_path / "result.json",
         iterations=3,
-        warmup_iterations=1,
+        warmup_iterations=2,
         source_sha="a" * 40,
         source_verifier=lambda _source: None,
         inventory={
