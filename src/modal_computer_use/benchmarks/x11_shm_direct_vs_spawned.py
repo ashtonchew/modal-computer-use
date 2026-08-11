@@ -550,10 +550,14 @@ def _validate_sample(value: object, *, expected_arm: str) -> dict[str, Any]:
                 "worker_response_prep_ms",
             )
         )
-        # These worker stages occur while the parent waits for the response
-        # header.  They are nested inside header_wait, not additive with the
-        # parent I/O stages already covered by parent_total.
-        if timing["parent_header_wait_ms"] + 1e-6 < worker_before_header_ms:
+        # The worker can receive and start the request before the parent's
+        # send call returns.  Its dispatch/native/preparation stages therefore
+        # fit inside the combined parent send + response-header interval, not
+        # response-header wait alone.
+        if (
+            timing["parent_send_ms"] + timing["parent_header_wait_ms"] + 1e-6
+            < worker_before_header_ms
+        ):
             raise ValueError("spawned nested timing algebra is invalid")
     return {
         "pair_index": pair_index,

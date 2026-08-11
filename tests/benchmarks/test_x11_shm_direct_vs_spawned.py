@@ -603,6 +603,17 @@ def test_artifact_rejects_spawned_nested_timing_mutation() -> None:
     assert artifact["failure_type"] == "EvidenceValidationError"
 
 
+def test_spawned_worker_timing_can_overlap_parent_send_and_header_wait() -> None:
+    observation = _observation()
+    timing = observation["arms"]["spawned_worker"]["observations"][0]["timing"]
+    timing["parent_send_ms"] = 0.00005
+    timing["parent_header_wait_ms"] = 0.00001
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "complete"
+
+
 def test_artifact_retains_safe_hashes_but_rejects_pixel_parity_mismatch() -> None:
     observation = _observation(passed=False)
     observation["arms"]["spawned_worker"]["observations"][0]["pixel_hash"] = "b" * 64
