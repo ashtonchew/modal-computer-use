@@ -574,6 +574,15 @@ def test_scheduling_diagnostic_has_safe_remote_and_local_entrypoints() -> None:
     assert "def run_x11_shm_scheduling_diagnostic(" in runner
     assert "def x11_shm_scheduling_diagnostic_main(" in runner
     assert "run_x11_shm_scheduling_diagnostic.remote(" in runner
+
+
+def test_x11_benchmark_bakes_daemon_source_for_nested_sandbox() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from modal_computer_use.image import _named_image_recipe" in runner
+    assert '_named_image_recipe(variant="chromium", window_manager="xfce")' in runner
     assert 'lambda: _ArmContext("x11-shm")' in runner
     assert 'Path("benchmark-data/x11-shm-scheduling-diagnostic-1000.json")' in runner
     assert "provenance=_local_provenance()" in runner

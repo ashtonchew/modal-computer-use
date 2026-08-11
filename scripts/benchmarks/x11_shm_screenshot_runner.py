@@ -50,7 +50,7 @@ from modal_computer_use.config import (
     RuntimeConfig,
 )
 from modal_computer_use.errors import DaemonHTTPError
-from modal_computer_use.image import default_image
+from modal_computer_use.image import _named_image_recipe
 from modal_computer_use.latency import SessionStartupTiming
 
 _RUNNER_PATH = Path(__file__).resolve()
@@ -300,12 +300,7 @@ app = modal.App(APP_NAME)
 # creation. Benchmark scripts are the final runtime mount, so no build step
 # follows a local startup mount.
 image = (
-    default_image(
-        profile="browser",
-        browser="chromium",
-        window_manager="xfce",
-        browser_prewarm=True,
-    )
+    _named_image_recipe(variant="chromium", window_manager="xfce")
     .add_local_dir(
         str(PROJECT_ROOT / "scripts"),
         remote_path="/opt/mcu-scripts",
