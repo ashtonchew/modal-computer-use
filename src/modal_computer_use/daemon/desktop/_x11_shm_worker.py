@@ -7,6 +7,7 @@ import importlib
 import socket
 import struct
 from contextlib import suppress
+from time import perf_counter_ns
 from typing import Any
 
 MODULE_NAME = "_modal_computer_use_x11_shm"
@@ -14,9 +15,15 @@ PROTOCOL_MAGIC = b"XSM1"
 REQUEST_HEADER = struct.Struct("!4sBII")
 RESPONSE_HEADER = struct.Struct("!4sBII")
 CAPTURE_PAYLOAD = struct.Struct("!iiii")
+TIMING_MAGIC = b"XST1"
+TIMING_VERSION = 1
+# magic, version, X11 reply, RGB conversion, PNG encode, native total,
+# worker dispatch, and response preparation. All durations are nanoseconds.
+TIMING_HEADER = struct.Struct("!4sB6Q")
 
 OP_CAPTURE = 1
 OP_CLOSE = 2
+OP_CAPTURE_TIMED = 3
 
 STATUS_READY = 1
 STATUS_CAPTURED = 2
@@ -88,6 +95,29 @@ def _serve(
                 return False
             _send_response(connection, STATUS_CAPTURED, request_id, data)
             continue
+        if operation == OP_CAPTURE_TIMED and payload_length == CAPTURE_PAYLOAD.size:
+            decoded_ns = perf_counter_ns()
+            x, y, width, height = CAPTURE_PAYLOAD.unpack(
+                _recv_exact(connection, payload_length)
+            )
+            try:
+                called_ns = perf_counter_ns()
+                result = session.capture_png_timed(x, y, width, height)
+                returned_ns = perf_counter_ns()
+                data, native_timing = _validate_timed_capture(result, payload_limit)
+                prepared_ns = perf_counter_ns()
+            except Exception as exc:
+                _send_response(connection, _error_status(exc, timeout_error), request_id)
+                return False
+            envelope = TIMING_HEADER.pack(
+                TIMING_MAGIC,
+                TIMING_VERSION,
+                *native_timing,
+                called_ns - decoded_ns,
+                prepared_ns - returned_ns,
+            )
+            _send_response(connection, STATUS_CAPTURED, request_id, envelope + data)
+            continue
         if operation == OP_CLOSE and payload_length == 0:
             try:
                 session.close()
@@ -123,6 +153,32 @@ def _send_response(
 
 def _is_exception_type(value: Any) -> bool:
     return isinstance(value, type) and issubclass(value, BaseException)
+
+
+def _validate_timed_capture(
+    result: object, payload_limit: int
+) -> tuple[bytes, tuple[int, int, int, int]]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise ValueError("invalid timed capture result")
+    data, raw_timing = result
+    if not isinstance(data, bytes) or not data or len(data) > payload_limit:
+        raise ValueError("invalid timed capture payload")
+    if not isinstance(raw_timing, tuple) or len(raw_timing) != 4:
+        raise ValueError("invalid timed capture stages")
+    stages: list[int] = []
+    for value in raw_timing:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > 2**64 - 1
+        ):
+            raise ValueError("invalid timed capture stage")
+        stages.append(value)
+    x11_reply_ns, rgb_convert_ns, png_encode_ns, native_total_ns = stages
+    if native_total_ns < x11_reply_ns + rgb_convert_ns + png_encode_ns:
+        raise ValueError("invalid timed capture stage algebra")
+    return data, (x11_reply_ns, rgb_convert_ns, png_encode_ns, native_total_ns)
 
 
 def _error_status(exc: Exception, timeout_error: type[BaseException]) -> int:
