@@ -18,7 +18,7 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_base_url
-from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT, ACTION_FRAME_PROVIDER_TOPOLOGY
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -79,6 +79,7 @@ def run_daytona_provider(
         "ingress_included": False,
         "first_observation_api": "computer_use.screenshot.take_full_screen",
         "target_kind": "product",
+        "topology": dict(ACTION_FRAME_PROVIDER_TOPOLOGY),
     }
     if not snapshot:
         metadata.update(_daytona_default_resource_metadata())

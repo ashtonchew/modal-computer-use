@@ -19,7 +19,11 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
-from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
+from .action_frame import (
+    ACTION_FRAME_CASE_ID,
+    ACTION_FRAME_POINT,
+    ACTION_FRAME_PROVIDER_TOPOLOGY,
+)
 from .live import run_product_provider_cases, wait_for_provider_screenshot_ready
 from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
@@ -114,6 +118,7 @@ def run_tzafon_provider(
         "ingress_included": False,
         "first_observation_api": "computers.screenshot(base64=True)",
         "target_kind": "product",
+        "topology": dict(ACTION_FRAME_PROVIDER_TOPOLOGY),
         "action_equivalence": {
             "move_click": (
                 "one coordinate click; Tzafon does not expose a standalone pointer-move action"

@@ -590,6 +590,7 @@ def _safe_provider_metadata(value: Any) -> dict[str, Any]:
         "storage_gib_source",
         "persistent",
         "computer_kind",
+        "topology",
     }
     return {key: value[key] for key in allowed if key in value}
 

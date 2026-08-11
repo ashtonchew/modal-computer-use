@@ -22,6 +22,12 @@ ACTION_FRAME_SEMANTICS = "one-left-click-at-512-384-then-immediate-full-frame"
 ACTION_FRAME_TIMER_BOUNDARY = (
     "caller_before_ordered_action_dispatch_to_validated_immediate_full_frame_bytes"
 )
+ACTION_FRAME_PROVIDER_TOPOLOGY = {
+    "caller": "external-provider-sdk-caller",
+    "requested_region": "provider-default",
+    "observed_region": "provider-default",
+    "placement": "provider-default",
+}
 ACTION_FRAME_SCREENSHOT = {
     "format": "provider-native",
     "show_cursor": None,

@@ -17,7 +17,7 @@ from ..constants import (
     coordinate_click_target,
 )
 from ..lifecycle import CleanupError
-from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT, ACTION_FRAME_PROVIDER_TOPOLOGY
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -68,6 +68,7 @@ def run_e2b_provider(
         "ingress_included": False,
         "first_observation_api": "Sandbox.screenshot",
         "target_kind": "product",
+        "topology": dict(ACTION_FRAME_PROVIDER_TOPOLOGY),
         "resolution": "1024x768",
         "dpi": 96,
         "display": ":0",
