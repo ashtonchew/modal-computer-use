@@ -2652,6 +2652,24 @@ def _build_x11_shm_scheduling_diagnostic(
     daemon_schedstat_delta: dict[str, int] | None = None
     worker_schedstat_delta: dict[str, int] | None = None
     client_schedstat_delta: dict[str, int] | None = None
+
+    def optional_schedstat_delta(prefix: str) -> dict[str, int] | None:
+        raw_before = observation.get(f"{prefix}_schedstat_before")
+        raw_after = observation.get(f"{prefix}_schedstat_after")
+        if raw_before is None and raw_after is None:
+            return None
+        if raw_before is None or raw_after is None:
+            raise ValueError("scheduling diagnostic schedstat availability changed")
+        before = _retain_scheduling_counter_snapshot(
+            raw_before,
+            X11_SCHEDULING_SCHEDSTAT_FIELDS,
+        )
+        after = _retain_scheduling_counter_snapshot(
+            raw_after,
+            X11_SCHEDULING_SCHEDSTAT_FIELDS,
+        )
+        return _scheduling_counter_delta(before, after)
+
     if observation.get("passed") is True:
         try:
             summaries = _retain_scheduling_summaries(observation.get("summaries"))
@@ -2711,41 +2729,11 @@ def _build_x11_shm_scheduling_diagnostic(
             )
             if any(per_request_sums[key] > cgroup_delta[key] for key in cgroup_delta):
                 raise ValueError("scheduling diagnostic sampled cgroup delta is invalid")
-            daemon_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("daemon_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            daemon_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("daemon_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            daemon_schedstat_delta = _scheduling_counter_delta(
-                daemon_schedstat_before, daemon_schedstat_after
-            )
+            daemon_schedstat_delta = optional_schedstat_delta("daemon")
             if worker_before is None or worker_after is None:
                 raise ValueError("scheduling diagnostic worker identity is unavailable")
-            worker_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("worker_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            worker_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("worker_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            worker_schedstat_delta = _scheduling_counter_delta(
-                worker_schedstat_before, worker_schedstat_after
-            )
-            client_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("client_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            client_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("client_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            client_schedstat_delta = _scheduling_counter_delta(
-                client_schedstat_before, client_schedstat_after
-            )
+            worker_schedstat_delta = optional_schedstat_delta("worker")
+            client_schedstat_delta = optional_schedstat_delta("client")
         except (TypeError, ValueError, OverflowError):
             validation_failed = True
             summaries = None
@@ -2958,9 +2946,6 @@ def _build_x11_shm_scheduling_diagnostic(
         and correlations is not None
         and cpu_max is not None
         and cgroup_delta is not None
-        and daemon_schedstat_delta is not None
-        and worker_schedstat_delta is not None
-        and client_schedstat_delta is not None
         and retained_provenance is not None
     )
     if observation.get("passed") is True and not contract_matches:
@@ -3028,7 +3013,9 @@ def _build_x11_shm_scheduling_diagnostic(
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_identity_same": worker_same,
+        "daemon_schedstat_available": daemon_schedstat_delta is not None,
         "worker_schedstat_available": worker_schedstat_delta is not None,
+        "client_schedstat_available": client_schedstat_delta is not None,
         "cpu_max": cpu_max,
         "cgroup_cpu_stat_before": cgroup_before,
         "cgroup_cpu_stat_after": cgroup_after,
@@ -3999,11 +3986,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
                 raise RuntimeError("daemon/worker process identity pair unavailable")
             daemon_sched_before = schedstat(daemon_before["pid"])
             client_sched_before = schedstat(os.getpid())
-            if daemon_sched_before is None or client_sched_before is None:
-                raise RuntimeError("required schedstat unavailable")
             worker_sched_before = schedstat(worker_before["pid"])
-            if worker_sched_before is None:
-                raise RuntimeError("x11-shm worker schedstat unavailable")
             failure_phase = "cgroup_before"
             cgroup_before = cpu_stat(directory)
             if cgroup_before is None or cpu_limit is None:
@@ -4038,13 +4021,19 @@ def _build_x11_shm_scheduling_diagnostic_script(
             ) = process_identity_pair()
             if daemon_after is None or worker_after is None:
                 raise RuntimeError("terminal daemon/worker identity pair unavailable")
-            daemon_sched_after = schedstat(daemon_after["pid"])
-            client_sched_after = schedstat(os.getpid())
-            if daemon_sched_after is None or client_sched_after is None:
-                raise RuntimeError("terminal required schedstat unavailable")
-            worker_sched_after = schedstat(worker_after["pid"])
-            if worker_sched_after is None:
-                raise RuntimeError("terminal x11-shm worker schedstat unavailable")
+            daemon_sched_after = (
+                schedstat(daemon_after["pid"])
+                if daemon_sched_before is not None
+                else None
+            )
+            client_sched_after = (
+                schedstat(os.getpid()) if client_sched_before is not None else None
+            )
+            worker_sched_after = (
+                schedstat(worker_after["pid"])
+                if worker_sched_before is not None
+                else None
+            )
             if (
                 daemon_after["pid"] != daemon_before["pid"]
                 or daemon_after["starttime_ticks"] != daemon_before["starttime_ticks"]
