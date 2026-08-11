@@ -238,3 +238,27 @@ def test_run_command_uses_only_external_action_frame_providers(tmp_path) -> None
     assert "modal-daemon" not in command
     assert result["source_sha"] == "a" * 40
     assert (tmp_path / "result.json").is_file()
+
+
+def test_execute_compare_prepends_exact_source_path(monkeypatch) -> None:
+    runner = _load_runner()
+    captured: dict[str, Any] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs["env"]
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    monkeypatch.setenv("PYTHONPATH", "/another/checkout/src")
+
+    assert runner.execute_compare([sys.executable, "-m", "modal_computer_use.cli"]) == (
+        0,
+        "{}",
+        "",
+    )
+    assert captured["command"] == [sys.executable, "-m", "modal_computer_use.cli"]
+    assert captured["env"]["PYTHONPATH"].split(os.pathsep)[:2] == [
+        str(runner.PROJECT_ROOT / "src"),
+        "/another/checkout/src",
+    ]

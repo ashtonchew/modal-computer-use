@@ -326,12 +326,21 @@ def _find_list_method(target: Any, names: tuple[str, ...]) -> Callable[[], Any]:
 def execute_compare(command: list[str]) -> tuple[int, str, str]:
     """Execute the fixed provider comparison command without shell interpolation."""
 
+    child_environment = os.environ.copy()
+    source_path = str(PROJECT_ROOT / "src")
+    existing_pythonpath = child_environment.get("PYTHONPATH")
+    child_environment["PYTHONPATH"] = (
+        source_path
+        if not existing_pythonpath
+        else os.pathsep.join((source_path, existing_pythonpath))
+    )
     result = subprocess.run(  # noqa: S603 - command is assembled from fixed allowlisted flags.
         command,
         cwd=PROJECT_ROOT,
         check=False,
         capture_output=True,
         text=True,
+        env=child_environment,
     )
     return result.returncode, result.stdout, result.stderr
 
