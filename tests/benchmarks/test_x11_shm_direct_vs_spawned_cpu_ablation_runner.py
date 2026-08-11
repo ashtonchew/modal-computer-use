@@ -23,6 +23,7 @@ _SPEC.loader.exec_module(runner)
 
 def test_base_runner_is_a_static_sibling_import_for_modal_automount() -> None:
     assert runner.base_runner.__name__ == "x11_shm_direct_vs_spawned_runner"
+    assert "/opt/mcu-scripts/benchmarks" in runner._SCRIPT_DIRECTORIES
 
 
 def test_outer_deadline_leaves_cleanup_slack_for_both_profiles() -> None:
