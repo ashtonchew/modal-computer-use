@@ -17,7 +17,9 @@ from time import perf_counter_ns
 from typing import Any
 
 from modal_computer_use.daemon.desktop.screenshot_capture import (
+    SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS,
     NativeCaptureTiming,
+    ScreenshotCaptureTimedOut,
     X11SharedMemoryScreenshotSession,
 )
 
@@ -78,16 +80,40 @@ _STAGE_FAILURE_PHASES = frozenset(
 class _StageProgress:
     def __init__(self) -> None:
         self.phase = "workload_contract"
+        self.warmups_completed = 0
+        self.captures_completed = 0
+        self.full_captures = 0
+        self.region_captures = 0
+        self.cgroup_available: bool | None = None
+        self.cgroup_version: str | None = None
 
 
 class _StageAttributionFailure(RuntimeError):
-    def __init__(self, phase: str, failure_type: str) -> None:
+    def __init__(
+        self,
+        progress: _StageProgress,
+        failure_type: str,
+        *,
+        timeout_origin: str | None,
+    ) -> None:
+        phase = progress.phase
         self.safe_phase = phase if phase in _STAGE_FAILURE_PHASES else "unknown"
         self.safe_failure_type = (
             failure_type
             if failure_type.isidentifier() and len(failure_type) <= 64
             else "RuntimeError"
         )
+        self.safe_timeout_origin = (
+            timeout_origin
+            if timeout_origin in SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS
+            else None
+        )
+        self.warmups_completed = progress.warmups_completed
+        self.captures_completed = progress.captures_completed
+        self.full_captures = progress.full_captures
+        self.region_captures = progress.region_captures
+        self.cgroup_available = progress.cgroup_available
+        self.cgroup_version = progress.cgroup_version
         super().__init__("stage attribution diagnostic failed")
 
 
@@ -397,7 +423,11 @@ async def _run_child_inner(
     except (OSError, _CgroupEvidenceUnavailable):
         cgroup_source = None
         cpu_limit = None
+        progress.cgroup_available = False
+        progress.cgroup_version = None
     else:
+        progress.cgroup_available = True
+        progress.cgroup_version = cgroup_source.version
         progress.phase = "cpu_limit"
         cpu_limit = _cpu_max(cgroup_source)
     progress.phase = "native_import"
@@ -428,6 +458,8 @@ async def _run_child_inner(
         except (OSError, _CgroupEvidenceUnavailable):
             cgroup_source = None
             cpu_limit = None
+            progress.cgroup_available = False
+            progress.cgroup_version = None
         else:
             if not worker_cgroup_same:
                 raise RuntimeError("timed worker does not share the diagnostic cgroup")
@@ -472,6 +504,7 @@ async def _run_child_inner(
             if digest != expected_digest:
                 raise RuntimeError("captured frame changed during the fixed diagnostic")
             if not measured:
+                progress.warmups_completed += 1
                 continue
             if cgroup_source is not None:
                 progress.phase = "request_cgroup"
@@ -500,6 +533,11 @@ async def _run_child_inner(
                 }
             )
             payload_sizes[lane].append(len(data))
+            progress.captures_completed += 1
+            if lane == "full":
+                progress.full_captures += 1
+            else:
+                progress.region_captures += 1
         progress.phase = "worker_identity_after"
         worker_after = _process_identity(worker_before["pid"])
     finally:
@@ -586,22 +624,35 @@ async def _run_child(*, captures: int, warmups: int) -> dict[str, Any]:
             progress=progress,
         )
     except Exception as exc:
-        raise _StageAttributionFailure(progress.phase, type(exc).__name__) from None
+        timeout_origin = (
+            exc.timeout_origin if isinstance(exc, ScreenshotCaptureTimedOut) else None
+        )
+        raise _StageAttributionFailure(
+            progress,
+            type(exc).__name__,
+            timeout_origin=timeout_origin,
+        ) from None
 
 
 def run_child(*, captures: int = CAPTURES, warmups: int = WARMUPS) -> dict[str, Any]:
     try:
         return asyncio.run(_run_child(captures=captures, warmups=warmups))
     except _StageAttributionFailure as exc:
-        return {
+        result = {
             "passed": False,
-            "warmups_completed": 0,
-            "captures_completed": 0,
-            "full_captures": 0,
-            "region_captures": 0,
+            "warmups_completed": exc.warmups_completed,
+            "captures_completed": exc.captures_completed,
+            "full_captures": exc.full_captures,
+            "region_captures": exc.region_captures,
             "failure_type": exc.safe_failure_type,
             "failure_phase": exc.safe_phase,
         }
+        if exc.safe_timeout_origin is not None:
+            result["failure_timeout_origin"] = exc.safe_timeout_origin
+        if exc.cgroup_available is not None:
+            result["cgroup_available"] = exc.cgroup_available
+            result["cgroup_version"] = exc.cgroup_version
+        return result
 
 
 def _validate_identity(value: object) -> dict[str, int]:
@@ -750,6 +801,71 @@ def _safe_label(value: object) -> str | None:
     return value
 
 
+def _validate_failure_progress(
+    *,
+    warmups: int,
+    captures: int,
+    full: int,
+    region: int,
+    failure_type: str | None,
+    failure_phase: str | None,
+    timeout_origin: object,
+    child_evidence: bool,
+) -> str | None:
+    if failure_type is None or failure_phase is None:
+        raise ValueError("failed stage classification is unavailable")
+    if child_evidence and failure_phase not in _STAGE_FAILURE_PHASES:
+        raise ValueError("failed child stage phase is invalid")
+    if full + region != captures:
+        raise ValueError("failed stage capture counts are inconsistent")
+    if full != (captures + 1) // 2 or region != captures // 2:
+        raise ValueError("failed stage lane counts are inconsistent")
+    if warmups < WARMUPS and captures != 0:
+        raise ValueError("failed stage measured before warmups completed")
+    if failure_phase in {"warmup_full_capture", "warmup_region_capture"}:
+        expected_phase = (
+            "warmup_full_capture" if warmups % 2 == 0 else "warmup_region_capture"
+        )
+        if warmups >= WARMUPS or captures != 0 or failure_phase != expected_phase:
+            raise ValueError("failed stage warmup phase is inconsistent")
+    if failure_phase in {"measured_full_capture", "measured_region_capture"}:
+        expected_phase = (
+            "measured_full_capture"
+            if captures % 2 == 0
+            else "measured_region_capture"
+        )
+        if warmups != WARMUPS or failure_phase != expected_phase:
+            raise ValueError("failed stage measured phase is inconsistent")
+    if failure_type == "ScreenshotCaptureTimedOut":
+        if timeout_origin not in SCREENSHOT_CAPTURE_TIMEOUT_ORIGINS:
+            raise ValueError("failed stage timeout origin is invalid")
+        if timeout_origin in {
+            "native_x11_setup_deadline",
+            "worker_startup_deadline",
+        }:
+            if (
+                failure_phase != "session_start"
+                or warmups != 0
+                or captures != 0
+            ):
+                raise ValueError("failed stage startup timeout phase is inconsistent")
+        elif timeout_origin == "native_x11_reply_deadline" and failure_phase == (
+            "session_close"
+        ):
+            pass
+        elif failure_phase not in {
+            "warmup_full_capture",
+            "warmup_region_capture",
+            "measured_full_capture",
+            "measured_region_capture",
+        }:
+            raise ValueError("failed stage capture timeout phase is inconsistent")
+        return str(timeout_origin)
+    if timeout_origin is not None:
+        raise ValueError("non-timeout failure retained a timeout origin")
+    return None
+
+
 def _validate_summary(value: object, expected_count: int) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != {"sample_count", "metrics"}:
         raise ValueError("invalid stage summary")
@@ -790,6 +906,7 @@ def build_artifact(
 ) -> dict[str, Any]:
     validation_failed = False
     retained: dict[str, Any] = {}
+    failure_timeout_origin: str | None = None
     try:
         warmups = _bounded_count(
             observation.get("warmups_completed"), "warmups", maximum=WARMUPS
@@ -809,6 +926,35 @@ def build_artifact(
                 "region_captures": region,
             }
         )
+        target_identity = None
+        if observation.get("target_identity") is not None:
+            target_identity = _validate_target_identity(
+                observation.get("target_identity")
+            )
+            retained["target_identity"] = target_identity
+        if observation.get("passed") is not True:
+            failure_timeout_origin = _validate_failure_progress(
+                warmups=warmups,
+                captures=captures,
+                full=full,
+                region=region,
+                failure_type=_safe_label(observation.get("failure_type")),
+                failure_phase=_safe_label(observation.get("failure_phase")),
+                timeout_origin=observation.get("failure_timeout_origin"),
+                child_evidence=target_identity is not None,
+            )
+            if "cgroup_available" in observation:
+                failed_cgroup_available = observation.get("cgroup_available")
+                failed_cgroup_version = observation.get("cgroup_version")
+                if not isinstance(failed_cgroup_available, bool):
+                    raise ValueError("failed stage cgroup availability is invalid")
+                if failed_cgroup_available:
+                    if failed_cgroup_version not in {"v1", "v2"}:
+                        raise ValueError("failed stage cgroup version is invalid")
+                elif failed_cgroup_version is not None:
+                    raise ValueError("failed unavailable cgroup version is invalid")
+                retained["cgroup_available"] = failed_cgroup_available
+                retained["cgroup_version"] = failed_cgroup_version
         if observation.get("passed") is True:
             if (warmups, captures, full, region) != (
                 WARMUPS,
@@ -822,9 +968,8 @@ def build_artifact(
             module_identity = observation.get("module_identity")
             if module_identity != EXPECTED_MODULE_IDENTITY:
                 raise ValueError("stage diagnostic module identity changed")
-            target_identity = _validate_target_identity(
-                observation.get("target_identity")
-            )
+            if target_identity is None:
+                raise ValueError("stage diagnostic target identity is unavailable")
             worker_before = _validate_identity(observation.get("worker_identity_before"))
             worker_after = _validate_identity(observation.get("worker_identity_after"))
             if worker_before != worker_after:
@@ -1066,8 +1211,16 @@ def build_artifact(
         and cleanup_ok
         and retained_provenance is not None
     )
+    failure_type = (
+        "EvidenceValidationError"
+        if validation_failed or provenance_failed
+        else "CleanupError"
+        if observation.get("passed") is True and not cleanup_ok
+        else _safe_label(observation.get("failure_type"))
+    )
+    cgroup_available = retained.get("cgroup_available")
     return {
-        "schema_version": "x11-shm-stage-attribution.v2",
+        "schema_version": "x11-shm-stage-attribution.v3",
         "benchmark": "x11-shm-stage-attribution",
         "status": "complete" if passed else "rejected",
         "passed": passed,
@@ -1081,21 +1234,17 @@ def build_artifact(
         "lane_order_confounded": True,
         "cgroup_scope": (
             "sandbox-all-processes"
-            if retained.get("cgroup_available") is True
+            if cgroup_available is True
             else "unavailable"
+            if cgroup_available is False
+            else "not-collected"
         ),
-        "requested_source": "mss",
+        "daemon_requested_source": "mss",
         "diagnostic_source": "x11-shm",
         "warmups_requested": WARMUPS,
         "captures_requested": CAPTURES,
         **retained,
-        "failure_type": (
-            "EvidenceValidationError"
-            if validation_failed or provenance_failed
-            else "CleanupError"
-            if observation.get("passed") is True and not cleanup_ok
-            else _safe_label(observation.get("failure_type"))
-        ),
+        "failure_type": failure_type,
         "failure_phase": (
             "artifact_validation"
             if validation_failed or provenance_failed
@@ -1103,6 +1252,7 @@ def build_artifact(
             if observation.get("passed") is True and not cleanup_ok
             else _safe_label(observation.get("failure_phase"))
         ),
+        "failure_timeout_origin": failure_timeout_origin,
         "retries": 0,
         "replacement_samples": 0,
         "provenance": retained_provenance,
