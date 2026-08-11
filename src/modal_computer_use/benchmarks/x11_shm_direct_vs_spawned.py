@@ -58,7 +58,7 @@ CLEANUP_TIMEOUT_SECONDS = 2.5
 ARMS: tuple[ArmName, ArmName] = ("direct_native", "spawned_worker")
 DIRECT_ARM: ArmName = "direct_native"
 SPAWNED_ARM: ArmName = "spawned_worker"
-SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v1"
+SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v2"
 BENCHMARK_NAME = "x11-shm-direct-vs-spawned"
 EXPECTED_MODULE_IDENTITY = {
     "backend": "x11-shm",
@@ -74,6 +74,10 @@ SAFE_FAILURE_PHASES = frozenset(
         "target_module_hash",
         "target_image_identity",
         "target_cgroup_limits",
+        "target_cgroup_mapping",
+        "target_cpu_limit",
+        "target_memory_limit",
+        "target_limit_contract",
         "direct_session_start",
         "spawned_session_start",
         "warmup_capture",
@@ -134,7 +138,7 @@ SCOPE_CONTRACT = {
     "lane_order_confounded": True,
     "daemon_requested_source": "mss",
     "diagnostic_source": "x11-shm",
-    "cgroup_scope": "membership-only",
+    "cgroup_scope": "fixed-limit-only",
     # The current worker protocol does not expose a module hash handshake;
     # bind the run to the image/source identity and record that limitation.
     "worker_module_hash_handshake": False,
@@ -161,6 +165,14 @@ class _ProbeFailure(RuntimeError):
 
 class _DirectNativeTimeout(ScreenshotCaptureTimedOut):
     """Typed timeout from the direct native ABI, with no native error text."""
+
+
+class _TargetPreflightFailure(RuntimeError):
+    """Bounded target-preflight failure with no retained exception detail."""
+
+    def __init__(self, phase: str) -> None:
+        self.phase = phase if phase in SAFE_FAILURE_PHASES else "target_cgroup_limits"
+        super().__init__("target preflight failed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +307,7 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "period_usec",
         "memory_bytes",
         "cgroup_version",
+        "cgroup_resolution",
         "machine",
         "display",
         "width",
@@ -327,6 +340,7 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         or value["quota_usec"] < 1
         or value["memory_bytes"] != 2048 * 1024**2
         or value["cgroup_version"] != "v2"
+        or value["cgroup_resolution"] not in {"namespace-root", "namespace-relative"}
         or value["width"] != WIDTH
         or value["height"] != HEIGHT
         or not isinstance(value["machine"], str)
@@ -349,6 +363,7 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "period_usec": period,
         "memory_bytes": memory,
         "cgroup_version": "v2",
+        "cgroup_resolution": value["cgroup_resolution"],
         "machine": value["machine"],
         "display": display,
         "width": WIDTH,
@@ -808,10 +823,13 @@ def _module_identity(native: Any) -> dict[str, str]:
 def _v2_cgroup_directory(
     membership_text: str | None = None,
     *,
+    mountinfo_text: str | None = None,
     root: Path = Path("/sys/fs/cgroup"),
-) -> Path:
+) -> tuple[Path, str]:
     if membership_text is None:
         membership_text = Path("/proc/self/cgroup").read_text(encoding="utf-8")
+    if mountinfo_text is None:
+        mountinfo_text = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
     memberships = membership_text.splitlines()
     paths = []
     for line in memberships:
@@ -823,27 +841,57 @@ def _v2_cgroup_directory(
     relative = PurePosixPath(paths[0])
     if ".." in relative.parts:
         raise RuntimeError("target cgroup v2 membership is unsafe")
-    # /proc/self/cgroup is the kernel's authoritative membership path in this
-    # process's cgroup namespace.  Resolve it under that namespace's mount.
-    return root / paths[0].lstrip("/")
+    mount_roots = []
+    for line in mountinfo_text.splitlines():
+        before, separator, after = line.partition(" - ")
+        fields = before.split()
+        filesystem = after.split()
+        if (
+            separator
+            and len(fields) >= 6
+            and len(filesystem) >= 1
+            and filesystem[0] == "cgroup2"
+            and fields[4] == str(root)
+        ):
+            mount_roots.append(fields[3])
+    if len(mount_roots) != 1 or not mount_roots[0].startswith("/"):
+        raise RuntimeError("target cgroup v2 mount mapping is unavailable")
+    mount_root = PurePosixPath(mount_roots[0])
+    if ".." in mount_root.parts:
+        raise RuntimeError("target cgroup v2 mount mapping is unsafe")
+    # The membership path is relative to the process's cgroup namespace.  The
+    # mountinfo root can be a host-coordinate path, so only use it to verify
+    # the mounted filesystem type and mountpoint.
+    if str(relative) == "/":
+        return root, "namespace-root"
+    return root.joinpath(*relative.parts[1:]), "namespace-relative"
 
 
-def _runtime_limits() -> tuple[int, int, int]:
+def _runtime_limits() -> tuple[int, int, int, str]:
     """Read the exact one-CPU/2-GiB limits applied to this child."""
 
-    directory = _v2_cgroup_directory()
-    quota_text, period_text = (directory / "cpu.max").read_text(encoding="utf-8").split()
+    try:
+        directory, resolution = _v2_cgroup_directory()
+    except (OSError, RuntimeError, ValueError):
+        raise _TargetPreflightFailure("target_cgroup_mapping") from None
+    try:
+        quota_text, period_text = (directory / "cpu.max").read_text(encoding="utf-8").split()
+        cpu_quota, cpu_period = int(quota_text), int(period_text)
+    except (OSError, ValueError):
+        raise _TargetPreflightFailure("target_cpu_limit") from None
     if quota_text == "max":
-        raise RuntimeError("target CPU limit is unbounded")
-    cpu_quota, cpu_period = int(quota_text), int(period_text)
+        raise _TargetPreflightFailure("target_cpu_limit")
     memory_path = directory / "memory.max"
-    memory_text = memory_path.read_text(encoding="utf-8").strip()
-    if memory_text is None or memory_text in {"max", "-1"}:
-        raise RuntimeError("target memory limit is unavailable")
-    memory_bytes = int(memory_text)
+    try:
+        memory_text = memory_path.read_text(encoding="utf-8").strip()
+        memory_bytes = int(memory_text)
+    except (OSError, ValueError):
+        raise _TargetPreflightFailure("target_memory_limit") from None
+    if memory_text in {"max", "-1"}:
+        raise _TargetPreflightFailure("target_memory_limit")
     if cpu_quota != cpu_period or cpu_quota < 1 or memory_bytes != 2048 * 1024**2:
-        raise RuntimeError("target runtime limits differ from the fixed diagnostic")
-    return cpu_quota, cpu_period, memory_bytes
+        raise _TargetPreflightFailure("target_limit_contract")
+    return cpu_quota, cpu_period, memory_bytes, resolution
 
 
 def _target_identity(
@@ -865,7 +913,7 @@ def _target_identity(
         raise RuntimeError("target image identity is unavailable")
     if progress is not None:
         progress.phase = "target_cgroup_limits"
-    quota_usec, period_usec, memory_bytes = _runtime_limits()
+    quota_usec, period_usec, memory_bytes, cgroup_resolution = _runtime_limits()
     return {
         **_module_identity(native),
         "module_sha256": module_sha,
@@ -875,6 +923,7 @@ def _target_identity(
         "period_usec": period_usec,
         "memory_bytes": memory_bytes,
         "cgroup_version": "v2",
+        "cgroup_resolution": cgroup_resolution,
         "machine": platform.machine(),
         "display": display,
         "width": WIDTH,
@@ -1214,6 +1263,8 @@ async def _run_child(*, pairs: int, warmups: int, progress: _Progress) -> dict[s
     try:
         return await _run_child_inner(pairs=pairs, warmups=warmups, progress=progress)
     except BaseException as exc:
+        if isinstance(exc, _TargetPreflightFailure):
+            progress.phase = exc.phase
         failure_type, timeout_origin = _classify_failure(exc, arm=DIRECT_ARM)
         result: dict[str, Any] = {
             "passed": False,
