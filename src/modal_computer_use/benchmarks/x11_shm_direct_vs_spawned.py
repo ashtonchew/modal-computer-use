@@ -256,6 +256,15 @@ def empty_rejected_observation(failure_phase: str) -> dict[str, Any]:
     }
 
 
+def configure_resources(cpu: float) -> dict[str, float | int]:
+    """Select the private child resource contract for one CPU ablation arm."""
+
+    if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu not in {1.0, 2.0}:
+        raise ValueError("CPU ablation supports exactly 1.0 or 2.0 CPUs")
+    CONFIGURED_RESOURCES["cpu"] = cpu
+    return dict(CONFIGURED_RESOURCES)
+
+
 def pair_order(pair_index: int) -> tuple[ArmName, ArmName]:
     """Return deterministic AB/BA order for one measured pair."""
 
@@ -398,13 +407,18 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
             or value["cgroup_resolution"] not in {"namespace-root", "namespace-relative"}
             or isinstance(value["cpu"], bool)
             or not isinstance(value["cpu"], float)
-            or value["cpu"] != 1.0
+            or value["cpu"] != CONFIGURED_RESOURCES["cpu"]
         ):
             raise ValueError("available cgroup evidence has no safe resolution")
         quota = _bounded_count(value["quota_usec"], "target quota", maximum=2**31 - 1)
         period = _bounded_count(value["period_usec"], "target period", maximum=2**31 - 1)
         memory = _bounded_count(value["memory_bytes"], "target memory", maximum=16 * 1024**3)
-        if quota != period or quota < 1 or memory != CONFIGURED_RESOURCES["memory_bytes"]:
+        expected_quota = int(period * CONFIGURED_RESOURCES["cpu"])
+        if (
+            quota != expected_quota
+            or quota < 1
+            or memory != CONFIGURED_RESOURCES["memory_bytes"]
+        ):
             raise ValueError("available cgroup limits differ from the fixed runtime")
         cgroup_version = "v2"
         cgroup_resolution = value["cgroup_resolution"]
@@ -431,7 +445,7 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "codec_library": EXPECTED_MODULE_IDENTITY["codec_library"],
         "module_sha256": module_sha,
         "image_object_id": image_id,
-        "cpu": 1.0 if cgroup_available else None,
+        "cpu": CONFIGURED_RESOURCES["cpu"] if cgroup_available else None,
         "quota_usec": quota,
         "period_usec": period,
         "memory_bytes": memory,
@@ -445,17 +459,25 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
     }
 
 
-def _validate_configured_resources(value: object) -> dict[str, float | int]:
+def _validate_configured_resources(
+    value: object, *, expected_cpu: float | None = None
+) -> dict[str, float | int]:
     if not isinstance(value, Mapping) or set(value) != set(CONFIGURED_RESOURCES):
         raise ValueError("invalid authoritative configured resources")
     cpu = value["cpu"]
     memory = value["memory_bytes"]
-    if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu != 1.0:
+    configured_cpu = CONFIGURED_RESOURCES["cpu"] if expected_cpu is None else expected_cpu
+    if (
+        isinstance(cpu, bool)
+        or not isinstance(cpu, float)
+        or cpu not in {1.0, 2.0}
+        or cpu != configured_cpu
+    ):
         raise ValueError("invalid authoritative configured CPU")
     memory_bytes = _bounded_count(memory, "configured memory", maximum=16 * 1024**3)
     if memory_bytes != CONFIGURED_RESOURCES["memory_bytes"]:
         raise ValueError("invalid authoritative configured memory")
-    return {"cpu": 1.0, "memory_bytes": memory_bytes}
+    return {"cpu": cpu, "memory_bytes": memory_bytes}
 
 
 def _validate_timing(value: object) -> dict[str, float]:
@@ -1036,8 +1058,9 @@ def _runtime_limits() -> _RuntimeLimits:
         memory_bytes = int(memory_text)
     except ValueError:
         raise _TargetPreflightFailure("target_memory_limit") from None
+    expected_quota = int(cpu_period * CONFIGURED_RESOURCES["cpu"])
     if (
-        cpu_quota != cpu_period
+        cpu_quota != expected_quota
         or cpu_quota < 1
         or memory_bytes != CONFIGURED_RESOURCES["memory_bytes"]
     ):
@@ -1069,7 +1092,7 @@ def _target_identity(
         **_module_identity(native),
         "module_sha256": module_sha,
         "image_object_id": image_id,
-        "cpu": 1.0 if limits.cgroup_available else None,
+        "cpu": CONFIGURED_RESOURCES["cpu"] if limits.cgroup_available else None,
         "quota_usec": limits.quota_usec,
         "period_usec": limits.period_usec,
         "memory_bytes": limits.memory_bytes,
@@ -1454,7 +1477,8 @@ async def _run_child(*, pairs: int, warmups: int, progress: _Progress) -> dict[s
         return result
 
 
-def run_child(*, pairs: int = PAIRS, warmups: int = WARMUPS) -> dict[str, Any]:
+def run_child(*, pairs: int = PAIRS, warmups: int = WARMUPS, cpu: float = 1.0) -> dict[str, Any]:
+    configure_resources(cpu)
     progress = _Progress()
     return asyncio.run(_run_child(pairs=pairs, warmups=warmups, progress=progress))
 
@@ -1655,7 +1679,7 @@ def _validate_provenance(value: Mapping[str, Any]) -> dict[str, Any]:
         "x11_shm_source_sha256": source_sha,
         "cargo_lock_sha256": lock_sha,
         "image_identity": "inline:browser-chromium-x11-shm",
-        "configured_cpu": 1.0,
+        "configured_cpu": configured_cpu,
         "configured_memory_bytes": CONFIGURED_RESOURCES["memory_bytes"],
     }
 
@@ -1670,7 +1694,7 @@ def _safe_failure_summary(observation: Mapping[str, Any]) -> tuple[str | None, s
     return failure_type, origin
 
 
-def build_artifact(
+def _build_artifact_impl(
     observation: Mapping[str, Any],
     cleanup: Mapping[str, Any],
     provenance: Mapping[str, Any],
@@ -1836,6 +1860,41 @@ def build_artifact(
     return result
 
 
+def build_artifact(
+    observation: Mapping[str, Any],
+    cleanup: Mapping[str, Any],
+    provenance: Mapping[str, Any],
+    *,
+    configured_resources: Mapping[str, float | int] | None = None,
+) -> dict[str, Any]:
+    """Validate one child result, optionally under an ablation CPU contract.
+
+    The optional override is private benchmark plumbing.  It lets the CPU
+    ablation validate the same child contract independently for 1 and 2 CPU
+    Sandboxes while leaving all public/runtime capture defaults untouched.
+    """
+
+    if configured_resources is None:
+        return _build_artifact_impl(observation, cleanup, provenance)
+    if not isinstance(configured_resources, Mapping):
+        raise ValueError("invalid configured resources override")
+    requested_cpu = configured_resources.get("cpu")
+    if isinstance(requested_cpu, bool) or not isinstance(requested_cpu, float):
+        raise ValueError("invalid configured CPU override")
+    requested = _validate_configured_resources(
+        configured_resources,
+        expected_cpu=requested_cpu,
+    )
+    previous = dict(CONFIGURED_RESOURCES)
+    CONFIGURED_RESOURCES.clear()
+    CONFIGURED_RESOURCES.update(requested)
+    try:
+        return _build_artifact_impl(observation, cleanup, provenance)
+    finally:
+        CONFIGURED_RESOURCES.clear()
+        CONFIGURED_RESOURCES.update(previous)
+
+
 def _read_child_json() -> dict[str, Any]:
     raw = sys.stdin.read()
     value = json.loads(raw)
@@ -1849,10 +1908,11 @@ def main() -> None:
     parser.add_argument("--child", action="store_true")
     parser.add_argument("--pairs", type=int, default=PAIRS)
     parser.add_argument("--warmups", type=int, default=WARMUPS)
+    parser.add_argument("--cpu", type=float, default=1.0, choices=(1.0, 2.0))
     args = parser.parse_args()
     if not args.child:
         parser.error("this private module is invoked with --child")
-    result = run_child(pairs=args.pairs, warmups=args.warmups)
+    result = run_child(pairs=args.pairs, warmups=args.warmups, cpu=args.cpu)
     print(json.dumps(result, sort_keys=True))
 
 

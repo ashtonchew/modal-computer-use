@@ -141,7 +141,9 @@ def _tree_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def local_provenance() -> dict[str, str | bool | float | int]:
+def local_provenance(cpu: float = CPU) -> dict[str, str | bool | float | int]:
+    if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu not in {1.0, 2.0}:
+        raise ValueError("CPU ablation supports exactly 1.0 or 2.0 CPUs")
     revision = _git_output("rev-parse", "HEAD")
     clean = _git_output("status", "--porcelain") == ""
     if revision is None or len(revision) != 40 or not clean:
@@ -154,7 +156,7 @@ def local_provenance() -> dict[str, str | bool | float | int]:
             (NATIVE_SOURCE / "Cargo.lock").read_bytes()
         ).hexdigest(),
         "image_identity": "inline:browser-chromium-x11-shm",
-        "configured_cpu": CONFIGURED_RESOURCES["cpu"],
+        "configured_cpu": cpu,
         "configured_memory_bytes": CONFIGURED_RESOURCES["memory_bytes"],
     }
 
@@ -162,7 +164,11 @@ def local_provenance() -> dict[str, str | bool | float | int]:
 class _TargetContext(AbstractAsyncContextManager[Any]):
     """One managed Chromium/Xvfb Sandbox shared by both diagnostic arms."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, cpu: float = CPU, run_tag: str = RUN_TAG) -> None:
+        if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu not in {1.0, 2.0}:
+            raise ValueError("CPU ablation supports exactly 1.0 or 2.0 CPUs")
+        self.cpu = cpu
+        self.run_tag = run_tag
         self._context: AbstractAsyncContextManager[Any] | None = None
         self.computer: Any | None = None
 
@@ -196,7 +202,7 @@ class _TargetContext(AbstractAsyncContextManager[Any]):
             ),
             resources=ResourceConfig(
                 profile="browser",
-                cpu=CPU,
+                cpu=self.cpu,
                 memory_mib=MEMORY_MIB,
             ),
             actions=ActionConfig(
@@ -214,8 +220,8 @@ class _TargetContext(AbstractAsyncContextManager[Any]):
             app_name=APP_NAME,
             image=image,
             owner=APP_NAME,
-            tags={"benchmark_run": RUN_TAG},
-            cpu=(CPU, CPU),
+            tags={"benchmark_run": self.run_tag},
+            cpu=(self.cpu, self.cpu),
             memory=(MEMORY_MIB, MEMORY_MIB),
         )
         try:
@@ -257,11 +263,26 @@ async def _read_stdout(process: Any) -> str:
     raise RuntimeError("diagnostic child returned an invalid stdout type")
 
 
-async def _run_child(computer: Any) -> dict[str, Any]:
-    authoritative_resources = dict(CONFIGURED_RESOURCES)
+async def _run_child(
+    computer: Any, *, cpu: float = CPU, timeout_seconds: int = 3_600
+) -> dict[str, Any]:
+    if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu not in {1.0, 2.0}:
+        raise ValueError("CPU ablation supports exactly 1.0 or 2.0 CPUs")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 1 <= timeout_seconds <= 3_600
+    ):
+        raise ValueError("child timeout must be between 1 and 3600 seconds")
+    authoritative_resources = {
+        "cpu": cpu,
+        "memory_bytes": MEMORY_MIB * 1024**2,
+    }
     sandbox = getattr(computer, "_sandbox", None)
     if sandbox is None or not hasattr(sandbox, "exec"):
-        return _empty_rejected_observation("sandbox_handle")
+        value = _empty_rejected_observation("sandbox_handle")
+        value["configured_resources"] = authoritative_resources
+        return value
     try:
         process = await sandbox.exec.aio(
             "python",
@@ -272,7 +293,9 @@ async def _run_child(computer: Any) -> dict[str, Any]:
             str(PAIRS),
             "--warmups",
             str(WARMUPS),
-            timeout=3_600,
+            "--cpu",
+            str(cpu),
+            timeout=timeout_seconds,
         )
         exit_code = await process.wait.aio()
         output = await _read_stdout(process)
@@ -286,10 +309,12 @@ async def _run_child(computer: Any) -> dict[str, Any]:
             value["passed"] = False
         return value
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return _empty_rejected_observation("child_result")
+        value = _empty_rejected_observation("child_result")
+        value["configured_resources"] = authoritative_resources
+        return value
 
 
-async def _terminal_cleanup() -> dict[str, Any]:
+async def _terminal_cleanup(run_tag: str = RUN_TAG) -> dict[str, Any]:
     """Terminate tagged survivors and retain only bounded cleanup evidence."""
 
     errors: list[str] = []
@@ -298,7 +323,7 @@ async def _terminal_cleanup() -> dict[str, Any]:
     try:
         async for sandbox in modal.Sandbox.list.aio(
             app_id=app.app_id,
-            tags={"benchmark_run": RUN_TAG},
+            tags={"benchmark_run": run_tag},
         ):
             if await sandbox.poll.aio() is None:
                 survivors_before += 1
@@ -308,7 +333,7 @@ async def _terminal_cleanup() -> dict[str, Any]:
                     errors.append(type(exc).__name__)
         async for sandbox in modal.Sandbox.list.aio(
             app_id=app.app_id,
-            tags={"benchmark_run": RUN_TAG},
+            tags={"benchmark_run": run_tag},
         ):
             if await sandbox.poll.aio() is None:
                 remaining += 1
