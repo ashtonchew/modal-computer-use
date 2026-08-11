@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from modal_computer_use.benchmarks import x11_shm_stage_attribution as stage
 from modal_computer_use.daemon.desktop.screenshot_capture import (
@@ -62,6 +65,7 @@ def _observation() -> dict[str, object]:
         "worker_identity_before": {"pid": 7, "starttime_ticks": 11},
         "worker_identity_after": {"pid": 7, "starttime_ticks": 11},
         "worker_cgroup_same": True,
+        "cgroup_version": "v1",
         "cpu_max": {"quota_usec": 100_000, "period_usec": 100_000},
         "cgroup_cpu_stat_before": {field: 0 for field in stage.CGROUP_FIELDS},
         "cgroup_cpu_stat_after": {field: 0 for field in stage.CGROUP_FIELDS},
@@ -111,11 +115,77 @@ def test_stage_row_preserves_nested_timing_algebra() -> None:
     assert row["controller_boundary_residual_ms"] == 20 / 1_000_000
 
 
+def test_cpu_cgroup_path_supports_v1_and_v2() -> None:
+    assert stage._parse_cpu_cgroup_paths(
+        "0::/unified\n2:cpu:/legacy-cpu\n3:cpuacct:/legacy-usage\n"
+    ) == (
+        ("v2", "/unified"),
+        ("v1", "/legacy-cpu"),
+        ("v1_cpuacct", "/legacy-usage"),
+    )
+
+
+def test_cpu_cgroup_path_rejects_parent_traversal() -> None:
+    with pytest.raises(RuntimeError, match="invalid"):
+        stage._parse_cpu_cgroup_paths("0::/../../private\n")
+
+
+def test_v1_cpu_cgroup_normalizes_quota_and_counters(tmp_path: Path) -> None:
+    cpu_directory = tmp_path / "cpu"
+    cpu_directory.mkdir()
+    usage_file = tmp_path / "cpuacct" / "cpuacct.usage"
+    usage_file.parent.mkdir()
+    (cpu_directory / "cpu.cfs_quota_us").write_text("100000\n", encoding="utf-8")
+    (cpu_directory / "cpu.cfs_period_us").write_text("100000\n", encoding="utf-8")
+    usage_file.write_text("7000\n", encoding="utf-8")
+    (cpu_directory / "cpu.stat").write_text(
+        "nr_periods 11\nnr_throttled 3\nthrottled_time 5000\n",
+        encoding="utf-8",
+    )
+    source = stage._CpuCgroupSource(
+        version="v1",
+        directory=cpu_directory,
+        usage_file=usage_file,
+    )
+
+    assert stage._cpu_max(source) == {
+        "quota_usec": 100_000,
+        "period_usec": 100_000,
+    }
+    assert stage._cpu_stat(source) == {
+        "usage_usec": 7,
+        "nr_periods": 11,
+        "nr_throttled": 3,
+        "throttled_usec": 5,
+    }
+
+
+def test_hybrid_cgroup_probe_selects_available_v1_cpu_files(tmp_path: Path) -> None:
+    cpu_directory = tmp_path / "cpu" / "legacy-cpu"
+    cpu_directory.mkdir(parents=True)
+    (cpu_directory / "cpu.cfs_quota_us").write_text("100000\n", encoding="utf-8")
+    (cpu_directory / "cpu.stat").write_text("nr_periods 0\n", encoding="utf-8")
+    usage_file = tmp_path / "cpuacct" / "legacy-usage" / "cpuacct.usage"
+    usage_file.parent.mkdir(parents=True)
+    usage_file.write_text("0\n", encoding="utf-8")
+
+    source = stage._select_cpu_cgroup_source(
+        tmp_path,
+        (
+            ("v2", "/unified"),
+            ("v1", "/legacy-cpu"),
+            ("v1_cpuacct", "/legacy-usage"),
+        ),
+    )
+
+    assert source == stage._CpuCgroupSource("v1", cpu_directory, usage_file)
+
+
 def test_stage_child_retains_safe_preflight_failure_phase(monkeypatch) -> None:
     def fail_cgroup_directory() -> None:
         raise RuntimeError("private target detail")
 
-    monkeypatch.setattr(stage, "_cgroup_directory", fail_cgroup_directory)
+    monkeypatch.setattr(stage, "_cgroup_source", fail_cgroup_directory)
 
     result = stage.run_child()
 
@@ -137,7 +207,11 @@ def test_stage_child_retains_first_capture_failure_phase(monkeypatch) -> None:
     async def fail_capture(*args: object, **kwargs: object) -> None:
         raise RuntimeError("private capture detail")
 
-    monkeypatch.setattr(stage, "_cgroup_directory", lambda: None)
+    monkeypatch.setattr(
+        stage,
+        "_cgroup_source",
+        lambda: stage._CpuCgroupSource("v1", Path("/unused"), None),
+    )
     monkeypatch.setattr(
         stage,
         "_cpu_max",
@@ -154,7 +228,11 @@ def test_stage_child_retains_first_capture_failure_phase(monkeypatch) -> None:
         "_process_identity",
         lambda _: {"pid": 42, "starttime_ticks": 7},
     )
-    monkeypatch.setattr(stage, "_unified_cgroup_path", lambda *args: "/same")
+    monkeypatch.setattr(
+        stage,
+        "_cpu_cgroup_paths",
+        lambda *args: (("v1", "/same"),),
+    )
     monkeypatch.setattr(
         stage,
         "_cpu_stat",
@@ -179,6 +257,7 @@ def test_complete_stage_artifact_requires_fixed_safe_contract() -> None:
     assert artifact["non_gating"] is True
     assert artifact["promotion_proxy"] is False
     assert artifact["captures_completed"] == stage.CAPTURES
+    assert artifact["cgroup_version"] == "v1"
     assert artifact["tail_schedule"][0]["owner_over_50"] == (
         "executor_resume_or_boundary"
     )

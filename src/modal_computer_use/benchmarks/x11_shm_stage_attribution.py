@@ -11,7 +11,8 @@ import math
 import os
 import sys
 from collections.abc import Mapping
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from time import perf_counter_ns
 from typing import Any
 
@@ -90,6 +91,13 @@ class _StageAttributionFailure(RuntimeError):
         super().__init__("stage attribution diagnostic failed")
 
 
+@dataclass(frozen=True)
+class _CpuCgroupSource:
+    version: str
+    directory: Path
+    usage_file: Path | None
+
+
 def _finite_nonnegative(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"invalid {label}")
@@ -142,36 +150,110 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _unified_cgroup_path(process: str | int = "self") -> str:
-    unified = None
-    for line in Path(f"/proc/{process}/cgroup").read_text(encoding="utf-8").splitlines():
-        if line.startswith("0::"):
-            unified = line[3:]
-            break
-    if unified is None:
-        raise RuntimeError("cgroup v2 path is unavailable")
-    return unified
+def _parse_cpu_cgroup_paths(value: str) -> tuple[tuple[str, str], ...]:
+    paths: list[tuple[str, str]] = []
+    for line in value.splitlines():
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        _, controllers, path = parts
+        if not path.startswith("/") or ".." in PurePosixPath(path).parts:
+            raise RuntimeError("CPU cgroup path is invalid")
+        if not controllers:
+            paths.append(("v2", path))
+        elif "cpu" in controllers.split(","):
+            paths.append(("v1", path))
+        elif "cpuacct" in controllers.split(","):
+            paths.append(("v1_cpuacct", path))
+    if not paths:
+        raise RuntimeError("CPU cgroup path is unavailable")
+    return tuple(paths)
 
 
-def _cgroup_directory() -> Path:
-    return Path("/sys/fs/cgroup") / _unified_cgroup_path().lstrip("/")
+def _cpu_cgroup_paths(process: str | int = "self") -> tuple[tuple[str, str], ...]:
+    value = Path(f"/proc/{process}/cgroup").read_text(encoding="utf-8")
+    return _parse_cpu_cgroup_paths(value)
 
 
-def _cpu_stat(directory: Path) -> dict[str, int]:
+def _select_cpu_cgroup_source(
+    root: Path,
+    memberships: tuple[tuple[str, str], ...],
+) -> _CpuCgroupSource:
+    cpuacct_relatives = tuple(
+        relative for version, relative in memberships if version == "v1_cpuacct"
+    )
+    for version, relative in memberships:
+        if version == "v1_cpuacct":
+            continue
+        bases = (root,) if version == "v2" else (root / "cpu,cpuacct", root / "cpu")
+        for base in bases:
+            relative_path = relative.lstrip("/")
+            candidates = (base / relative_path,) if relative_path else (base,)
+            for candidate in candidates:
+                quota_file = "cpu.max" if version == "v2" else "cpu.cfs_quota_us"
+                if not (
+                    (candidate / quota_file).is_file()
+                    and (candidate / "cpu.stat").is_file()
+                ):
+                    continue
+                if version == "v2":
+                    return _CpuCgroupSource(version, candidate, None)
+                usage_relatives = cpuacct_relatives or (relative,)
+                usage_candidates = [candidate / "cpuacct.usage"]
+                for usage_relative in usage_relatives:
+                    usage_path = usage_relative.lstrip("/")
+                    usage_directory = (
+                        root / "cpuacct" / usage_path
+                        if usage_path
+                        else root / "cpuacct"
+                    )
+                    usage_candidates.append(usage_directory / "cpuacct.usage")
+                usage_file = next(
+                    (path for path in usage_candidates if path.is_file()), None
+                )
+                if usage_file is not None:
+                    return _CpuCgroupSource(version, candidate, usage_file)
+    raise RuntimeError("CPU cgroup directory is unavailable")
+
+
+def _cgroup_source() -> _CpuCgroupSource:
+    return _select_cpu_cgroup_source(
+        Path("/sys/fs/cgroup"),
+        _cpu_cgroup_paths(),
+    )
+
+
+def _cpu_stat(source: _CpuCgroupSource) -> dict[str, int]:
     values: dict[str, int] = {}
-    for line in (directory / "cpu.stat").read_text(encoding="utf-8").splitlines():
+    for line in (source.directory / "cpu.stat").read_text(encoding="utf-8").splitlines():
         key, raw = line.split()
-        if key in CGROUP_FIELDS:
+        if key in CGROUP_FIELDS or key == "throttled_time":
             values[key] = int(raw)
+    if "usage_usec" not in values and source.usage_file is not None:
+        values["usage_usec"] = int(source.usage_file.read_text(encoding="utf-8")) // 1_000
+    if "throttled_usec" not in values and "throttled_time" in values:
+        values["throttled_usec"] = values.pop("throttled_time") // 1_000
     if set(values) != set(CGROUP_FIELDS):
         raise RuntimeError("cgroup cpu.stat is incomplete")
     return values
 
 
-def _cpu_max(directory: Path) -> dict[str, int]:
-    quota, period = (directory / "cpu.max").read_text(encoding="utf-8").split()
-    if quota == "max":
-        raise RuntimeError("stage diagnostic requires a fixed CPU quota")
+def _cpu_max(source: _CpuCgroupSource) -> dict[str, int]:
+    if source.version == "v2":
+        quota, period = (source.directory / "cpu.max").read_text(
+            encoding="utf-8"
+        ).split()
+        if quota == "max":
+            raise RuntimeError("stage diagnostic requires a fixed CPU quota")
+    else:
+        quota = (source.directory / "cpu.cfs_quota_us").read_text(
+            encoding="utf-8"
+        ).strip()
+        period = (source.directory / "cpu.cfs_period_us").read_text(
+            encoding="utf-8"
+        ).strip()
+        if quota == "-1":
+            raise RuntimeError("stage diagnostic requires a fixed CPU quota")
     result = {"quota_usec": int(quota), "period_usec": int(period)}
     if result["quota_usec"] != result["period_usec"] or result["quota_usec"] < 1:
         raise RuntimeError("stage diagnostic requires exactly one CPU")
@@ -292,9 +374,9 @@ async def _run_child_inner(
     if captures != CAPTURES or warmups != WARMUPS:
         raise ValueError("stage diagnostic workload is fixed")
     progress.phase = "cgroup_directory"
-    directory = _cgroup_directory()
+    cgroup_source = _cgroup_source()
     progress.phase = "cpu_limit"
-    cpu_limit = _cpu_max(directory)
+    cpu_limit = _cpu_max(cgroup_source)
     progress.phase = "native_import"
     native = importlib.import_module("_modal_computer_use_x11_shm")
     progress.phase = "module_identity"
@@ -314,14 +396,16 @@ async def _run_child_inner(
         raise RuntimeError("timed worker identity is unavailable")
     worker_before = _process_identity(process.pid)
     progress.phase = "worker_cgroup"
-    worker_cgroup_same = _unified_cgroup_path(process.pid) == _unified_cgroup_path()
+    worker_cgroup_same = set(_cpu_cgroup_paths(process.pid)) == set(
+        _cpu_cgroup_paths()
+    )
     if not worker_cgroup_same:
         raise RuntimeError("timed worker does not share the diagnostic cgroup")
     rows: list[dict[str, Any]] = []
     lane_hashes: dict[str, bytes] = {}
     payload_sizes: dict[str, list[int]] = {"full": [], "region": []}
     progress.phase = "cgroup_before"
-    cgroup_before = _cpu_stat(directory)
+    cgroup_before = _cpu_stat(cgroup_source)
     worker_after = None
     try:
         for index in range(warmups + captures):
@@ -330,7 +414,7 @@ async def _run_child_inner(
             measured = index >= warmups
             if measured:
                 progress.phase = "request_cgroup"
-            cpu_before_request = _cpu_stat(directory) if measured else None
+            cpu_before_request = _cpu_stat(cgroup_source) if measured else None
             progress.phase = (
                 f"measured_{lane}_capture" if measured else f"warmup_{lane}_capture"
             )
@@ -343,7 +427,7 @@ async def _run_child_inner(
             )
             if measured:
                 progress.phase = "request_cgroup"
-            cpu_after_request = _cpu_stat(directory) if measured else None
+            cpu_after_request = _cpu_stat(cgroup_source) if measured else None
             progress.phase = "frame_stability"
             digest = hashlib.sha256(data).digest()
             expected_digest = lane_hashes.setdefault(lane, digest)
@@ -387,7 +471,7 @@ async def _run_child_inner(
     if worker_after is None:
         raise RuntimeError("terminal timed worker identity is unavailable")
     progress.phase = "cgroup_after"
-    cgroup_after = _cpu_stat(directory)
+    cgroup_after = _cpu_stat(cgroup_source)
     cgroup_delta = {
         field: cgroup_after[field] - cgroup_before[field] for field in CGROUP_FIELDS
     }
@@ -422,6 +506,7 @@ async def _run_child_inner(
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_cgroup_same": worker_cgroup_same,
+        "cgroup_version": cgroup_source.version,
         "cpu_max": cpu_limit,
         "cgroup_cpu_stat_before": cgroup_before,
         "cgroup_cpu_stat_after": cgroup_after,
@@ -683,6 +768,9 @@ def build_artifact(
                 raise ValueError("stage diagnostic worker identity changed")
             if observation.get("worker_cgroup_same") is not True:
                 raise ValueError("stage diagnostic worker cgroup changed")
+            cgroup_version = observation.get("cgroup_version")
+            if cgroup_version not in {"v1", "v2"}:
+                raise ValueError("stage diagnostic cgroup version is invalid")
             cpu_max = _validate_cpu_max(observation.get("cpu_max"))
             cgroup_before = _validate_cgroup(
                 observation.get("cgroup_cpu_stat_before"), "cgroup before"
@@ -841,6 +929,7 @@ def build_artifact(
                     "worker_identity_before": worker_before,
                     "worker_identity_after": worker_after,
                     "worker_cgroup_same": True,
+                    "cgroup_version": cgroup_version,
                     "summaries": summaries,
                     "tail_schedule": tail_schedule,
                     "payload_bytes": payload_bytes,
