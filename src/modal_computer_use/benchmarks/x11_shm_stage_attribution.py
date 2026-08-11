@@ -157,7 +157,7 @@ def _parse_cpu_cgroup_paths(value: str) -> tuple[tuple[str, str], ...]:
         if len(parts) != 3:
             continue
         _, controllers, path = parts
-        if not path.startswith("/") or ".." in PurePosixPath(path).parts:
+        if not path.startswith("/"):
             raise RuntimeError("CPU cgroup path is invalid")
         if not controllers:
             paths.append(("v2", path))
@@ -175,6 +175,22 @@ def _cpu_cgroup_paths(process: str | int = "self") -> tuple[tuple[str, str], ...
     return _parse_cpu_cgroup_paths(value)
 
 
+def _verified_membership_directories(base: Path, relative: str) -> tuple[Path, ...]:
+    parts = PurePosixPath(relative).parts
+    if ".." not in parts:
+        relative_path = relative.lstrip("/")
+        return (base / relative_path,) if relative_path else (base,)
+    process_id = str(os.getpid())
+    for membership_file in (base / "cgroup.procs", base / "tasks"):
+        try:
+            members = membership_file.read_text(encoding="utf-8").split()
+        except OSError:
+            continue
+        if process_id in members:
+            return (base,)
+    return ()
+
+
 def _select_cpu_cgroup_source(
     root: Path,
     memberships: tuple[tuple[str, str], ...],
@@ -187,9 +203,7 @@ def _select_cpu_cgroup_source(
             continue
         bases = (root,) if version == "v2" else (root / "cpu,cpuacct", root / "cpu")
         for base in bases:
-            relative_path = relative.lstrip("/")
-            candidates = (base / relative_path,) if relative_path else (base,)
-            for candidate in candidates:
+            for candidate in _verified_membership_directories(base, relative):
                 quota_file = "cpu.max" if version == "v2" else "cpu.cfs_quota_us"
                 if not (
                     (candidate / quota_file).is_file()
@@ -201,13 +215,13 @@ def _select_cpu_cgroup_source(
                 usage_relatives = cpuacct_relatives or (relative,)
                 usage_candidates = [candidate / "cpuacct.usage"]
                 for usage_relative in usage_relatives:
-                    usage_path = usage_relative.lstrip("/")
-                    usage_directory = (
-                        root / "cpuacct" / usage_path
-                        if usage_path
-                        else root / "cpuacct"
+                    usage_directories = _verified_membership_directories(
+                        root / "cpuacct", usage_relative
                     )
-                    usage_candidates.append(usage_directory / "cpuacct.usage")
+                    usage_candidates.extend(
+                        directory / "cpuacct.usage"
+                        for directory in usage_directories
+                    )
                 usage_file = next(
                     (path for path in usage_candidates if path.is_file()), None
                 )
