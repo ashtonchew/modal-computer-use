@@ -4,8 +4,10 @@ import asyncio
 import threading
 import time
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from modal_computer_use.benchmarks import x11_shm_direct_vs_spawned as probe
@@ -233,6 +235,59 @@ def test_artifact_drops_unrecognized_safe_looking_failure_phase() -> None:
 
     assert artifact["status"] == "rejected"
     assert artifact["failure_phase"] is None
+
+
+def test_artifact_retains_bounded_preflight_failure_envelope() -> None:
+    observation = {
+        "passed": False,
+        **probe.SCOPE_CONTRACT,
+        "warmups_completed": {arm: 0 for arm in probe.ARMS},
+        "captures_completed": {arm: 0 for arm in probe.ARMS},
+        "paired_prefix_samples": 0,
+        "unpaired_after_failure_samples": 0,
+        "first_unpaired_pair": None,
+        "pixel_hash_parity": False,
+        "arms": {},
+        "retries": 0,
+        "replacement_samples": 0,
+        "failure_type": "RuntimeError",
+        "failure_phase": "target_cgroup_limits",
+    }
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "RuntimeError"
+    assert artifact["failure_phase"] == "target_cgroup_limits"
+
+
+def test_runtime_limits_use_self_v2_membership_without_cpu_stat(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cgroup = tmp_path / "sandbox"
+    cgroup.mkdir()
+    (cgroup / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
+    (cgroup / "memory.max").write_text(str(2048 * 1024**2), encoding="utf-8")
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", lambda: cgroup)
+
+    assert probe._runtime_limits() == (100_000, 100_000, 2048 * 1024**2)
+
+
+def test_v2_cgroup_directory_parses_root_and_nested_memberships(tmp_path: Path) -> None:
+    assert probe._v2_cgroup_directory("0::/\n", root=tmp_path) == tmp_path
+    assert probe._v2_cgroup_directory("0::/sandbox/child\n", root=tmp_path) == (
+        tmp_path / "sandbox" / "child"
+    )
+
+
+def test_v2_cgroup_directory_rejects_ambiguous_or_unsafe_memberships(tmp_path: Path) -> None:
+    for membership in (
+        "2:cpu:/legacy\n",
+        "0::/one\n0::/two\n",
+        "0::/../sibling\n",
+    ):
+        with pytest.raises(RuntimeError):
+            probe._v2_cgroup_directory(membership, root=tmp_path)
 
 
 def test_artifact_rejects_nonpositive_process_identity_and_boolean_cpu() -> None:
