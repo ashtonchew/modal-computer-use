@@ -147,6 +147,8 @@ def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
     assert 'directory / "cpu.max"' in script
     assert 'cpu_limit["quota_usec"] != cpu_limit["period_usec"]' in script
     assert "client_sched_before = schedstat(os.getpid())" in script
+    assert 'raise RuntimeError("required schedstat unavailable")' not in script
+    assert 'raise RuntimeError("x11-shm worker schedstat unavailable")' not in script
     assert '"correlations"' in script
     assert '"body"' not in script
     assert '"headers"' not in script
@@ -360,6 +362,9 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
         "runqueue_wait_ns": 110,
         "timeslices": 8,
     }
+    assert artifact["daemon_schedstat_available"] is True
+    assert artifact["worker_schedstat_available"] is True
+    assert artifact["client_schedstat_available"] is True
     assert artifact["correlations"]["body_read_ms"][
         "cgroup_throttled_usec_delta"
     ] == {"coefficient": 0.25, "sample_count": 1_000}
@@ -377,6 +382,38 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
     assert keys(artifact).isdisjoint(
         {"body", "headers", "raw", "data", "authorization", "token"}
     )
+
+    without_schedstat = json_module.loads(json_module.dumps(observation))
+    for owner in ("daemon", "worker", "client"):
+        without_schedstat[f"{owner}_schedstat_before"] = None
+        without_schedstat[f"{owner}_schedstat_after"] = None
+    schedstat_optional = _build_x11_shm_scheduling_diagnostic(
+        without_schedstat, cleanup, provenance
+    )
+
+    assert schedstat_optional["passed"] is True
+    assert schedstat_optional["daemon_schedstat_available"] is False
+    assert schedstat_optional["worker_schedstat_available"] is False
+    assert schedstat_optional["client_schedstat_available"] is False
+    assert schedstat_optional["daemon_schedstat_delta"] is None
+    assert schedstat_optional["worker_schedstat_delta"] is None
+    assert schedstat_optional["client_schedstat_delta"] is None
+    assert schedstat_optional["cgroup_cpu_stat_deltas"] == {
+        "usage_usec": 4_000,
+        "nr_periods": 4,
+        "nr_throttled": 1,
+        "throttled_usec": 200,
+    }
+
+    changing_schedstat = json_module.loads(json_module.dumps(observation))
+    changing_schedstat["worker_schedstat_before"] = None
+    changing_schedstat_rejected = _build_x11_shm_scheduling_diagnostic(
+        changing_schedstat, cleanup, provenance
+    )
+
+    assert changing_schedstat_rejected["passed"] is False
+    assert changing_schedstat_rejected["failure_type"] == "EvidenceValidationError"
+    assert changing_schedstat_rejected["failure_phase"] == "artifact_validation"
 
     unsafe = json_module.loads(json_module.dumps(observation))
     unsafe["correlations"]["body_read_ms"]["cgroup_usage_usec_delta"][
