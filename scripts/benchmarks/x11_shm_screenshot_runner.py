@@ -88,6 +88,37 @@ CLOUD = "aws"
 WIDTH = 1024
 HEIGHT = 768
 DEPTH = 24
+
+_TARGET_RUNTIME_IDENTITY_PHASES = frozenset(
+    {
+        "exec_launch",
+        "process_wait",
+        "process_exit",
+        "stdout_read",
+        "empty_output",
+        "json_decode",
+        "envelope",
+        "sandbox_handle",
+        "native_import",
+        "cpu_limit",
+        "memory_limit",
+        "module_hash",
+        "image_object_id",
+        "backend_marker",
+        "codec_marker",
+        "module_sha256",
+    }
+)
+
+
+class _TargetRuntimeIdentityError(RuntimeError):
+    """Carry one bounded preflight phase without retaining target error text."""
+
+    def __init__(self, safe_phase: str) -> None:
+        if safe_phase not in _TARGET_RUNTIME_IDENTITY_PHASES:
+            safe_phase = "envelope"
+        self.safe_phase = safe_phase
+        super().__init__("target runtime identity preflight failed")
 CPU = 1.0
 MEMORY_MIB = 2048
 BROWSER_LAUNCH_ARGS = (
@@ -421,7 +452,7 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
 
     sandbox = getattr(computer, "_sandbox", None)
     if sandbox is None or not hasattr(sandbox, "exec"):
-        raise RuntimeError("sandbox handle unavailable for target identity")
+        raise _TargetRuntimeIdentityError("sandbox_handle")
     script = dedent(
         """
         import hashlib
@@ -429,8 +460,6 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
         import os
         import platform
         from pathlib import Path
-
-        import _modal_computer_use_x11_shm as native
 
         def read_text(path):
             return Path(path).read_text(encoding="utf-8").strip()
@@ -441,49 +470,111 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
                     return read_text(path)
             raise RuntimeError(f"target cgroup limit is unavailable: {paths}")
 
-        cpu_max = Path("/sys/fs/cgroup/cpu.max")
-        if cpu_max.is_file():
-            cpu_quota, cpu_period = read_text(cpu_max).split()
+        phase = "native_import"
+        try:
+            import _modal_computer_use_x11_shm as native
+
+            phase = "cpu_limit"
+            cpu_max = Path("/sys/fs/cgroup/cpu.max")
+            if cpu_max.is_file():
+                cpu_quota, cpu_period = read_text(cpu_max).split()
+            else:
+                cpu_quota = first_text((
+                    "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
+                    "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us",
+                ))
+                cpu_period = first_text((
+                    "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
+                    "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us",
+                ))
+            if cpu_quota in {"max", "-1"}:
+                raise RuntimeError("target CPU quota is unbounded")
+            cpu = int(cpu_quota) / int(cpu_period)
+
+            phase = "memory_limit"
+            memory_limit = first_text((
+                "/sys/fs/cgroup/memory.max",
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            ))
+            if memory_limit in {"max", "-1"}:
+                raise RuntimeError("target memory limit is unbounded")
+            memory_bytes = int(memory_limit)
+
+            phase = "module_hash"
+            module_bytes = Path(native.__file__).read_bytes()
+            module_sha256 = hashlib.sha256(module_bytes).hexdigest()
+
+            phase = "image_object_id"
+            image_object_id = os.environ.get("MODAL_IMAGE_ID")
+            if not isinstance(image_object_id, str) or not image_object_id.startswith("im-"):
+                raise RuntimeError("target image identity is unavailable")
+
+            phase = "backend_marker"
+            backend = native.backend
+            phase = "codec_marker"
+            codec = native.codec
+            identity = {
+                "backend": backend,
+                "codec": codec,
+                "module_sha256": module_sha256,
+                "image_object_id": image_object_id,
+                "cpu": cpu,
+                "memory_bytes": memory_bytes,
+                "machine": platform.machine(),
+            }
+        except Exception as exc:
+            print(json.dumps({
+                "ok": False,
+                "failure_phase": phase,
+                "failure_type": type(exc).__name__,
+            }, sort_keys=True))
         else:
-            cpu_quota = first_text((
-                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
-                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us",
-            ))
-            cpu_period = first_text((
-                "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
-                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us",
-            ))
-        if cpu_quota in {"max", "-1"}:
-            raise RuntimeError("target CPU quota is unbounded")
-        memory_limit = first_text((
-            "/sys/fs/cgroup/memory.max",
-            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-        ))
-        if memory_limit in {"max", "-1"}:
-            raise RuntimeError("target memory limit is unbounded")
-        module_bytes = Path(native.__file__).read_bytes()
-        print(json.dumps({
-            "backend": native.backend,
-            "codec": native.codec,
-            "module_sha256": hashlib.sha256(module_bytes).hexdigest(),
-            "image_object_id": os.environ.get("MODAL_IMAGE_ID"),
-            "cpu": int(cpu_quota) / int(cpu_period),
-            "memory_bytes": int(memory_limit),
-            "machine": platform.machine(),
-        }, sort_keys=True))
+            print(json.dumps({"ok": True, "identity": identity}, sort_keys=True))
         """
     )
-    process = await sandbox.exec.aio("python", "-c", script, timeout=30)
-    raw = await _completed_process_stdout_text(process)
-    payload = json.loads(raw)
+    try:
+        process = await sandbox.exec.aio("python", "-c", script, timeout=30)
+    except Exception:
+        raise _TargetRuntimeIdentityError("exec_launch") from None
+    try:
+        exit_code = await process.wait.aio()
+    except Exception:
+        raise _TargetRuntimeIdentityError("process_wait") from None
+    try:
+        raw = await _process_stdout_text(process)
+    except Exception:
+        raise _TargetRuntimeIdentityError("stdout_read") from None
+    if exit_code != 0:
+        raise _TargetRuntimeIdentityError("process_exit")
+    if not raw:
+        raise _TargetRuntimeIdentityError("empty_output")
+    try:
+        envelope = json.loads(raw)
+    except (TypeError, ValueError):
+        raise _TargetRuntimeIdentityError("json_decode") from None
+    if not isinstance(envelope, dict):
+        raise _TargetRuntimeIdentityError("envelope")
+    if envelope.get("ok") is False:
+        phase = envelope.get("failure_phase")
+        if not isinstance(phase, str):
+            phase = "envelope"
+        raise _TargetRuntimeIdentityError(phase)
+    payload = envelope.get("identity")
+    if envelope.get("ok") is not True or not isinstance(payload, dict):
+        raise _TargetRuntimeIdentityError("envelope")
+    if payload.get("backend") != "x11-shm":
+        raise _TargetRuntimeIdentityError("backend_marker")
+    if payload.get("codec") != "png-deflate-level1-no-filter":
+        raise _TargetRuntimeIdentityError("codec_marker")
+    module_sha256 = payload.get("module_sha256")
     if (
-        not isinstance(payload, dict)
-        or payload.get("backend") != "x11-shm"
-        or payload.get("codec") != "png-deflate-level1-no-filter"
-        or not isinstance(payload.get("module_sha256"), str)
-        or not str(payload.get("image_object_id", "")).startswith("im-")
+        not isinstance(module_sha256, str)
+        or len(module_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in module_sha256)
     ):
-        raise RuntimeError("target native build identity is invalid")
+        raise _TargetRuntimeIdentityError("module_sha256")
+    if not str(payload.get("image_object_id", "")).startswith("im-"):
+        raise _TargetRuntimeIdentityError("image_object_id")
     return payload
 
 
@@ -4284,13 +4375,19 @@ async def _run_x11_shm_stage_attribution_diagnostic(
             enter_phase = getattr(context, "enter_phase", None)
             if isinstance(enter_phase, str) and enter_phase:
                 failure_phase = f"context_enter.{enter_phase}"
+            if isinstance(exc, _TargetRuntimeIdentityError):
+                failure_phase = f"{failure_phase}.{exc.safe_phase}"
         observation = {
             "passed": False,
             "warmups_completed": 0,
             "captures_completed": 0,
             "full_captures": 0,
             "region_captures": 0,
-            "failure_type": type(exc).__name__,
+            "failure_type": (
+                "RuntimeError"
+                if isinstance(exc, _TargetRuntimeIdentityError)
+                else type(exc).__name__
+            ),
             "failure_phase": failure_phase,
         }
     finally:

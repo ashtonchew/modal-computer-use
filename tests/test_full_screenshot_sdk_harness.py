@@ -40,6 +40,8 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _run_x11_shm_stage_attribution_diagnostic,
     _run_x11_shm_transport_threshold_diagnostic,
     _select_daemon_worker_pair,
+    _target_runtime_identity,
+    _TargetRuntimeIdentityError,
     _validate_bounded_x_server_sample_count,
 )
 
@@ -667,6 +669,72 @@ def test_stage_attribution_retains_safe_context_entry_subphase() -> None:
     assert result["passed"] is False
     assert result["failure_type"] == "RuntimeError"
     assert result["failure_phase"] == "context_enter.runtime_identity"
+
+
+def test_stage_attribution_retains_safe_runtime_identity_failure_stage() -> None:
+    class FailedContext:
+        enter_phase = "runtime_identity"
+
+        async def __aenter__(self) -> None:
+            raise _TargetRuntimeIdentityError("native_import")
+
+        async def __aexit__(self, *args: object) -> None:
+            raise AssertionError("context exit must not run after failed entry")
+
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: FailedContext())
+    )
+
+    assert result["passed"] is False
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "context_enter.runtime_identity.native_import"
+
+
+def test_target_runtime_identity_maps_remote_failure_to_safe_stage() -> None:
+    remote_payload = {
+        "ok": False,
+        "failure_phase": "image_object_id",
+        "failure_type": "RuntimeError",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(remote_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:2] == ("python", "-c")
+            script = str(args[2])
+            assert script.index('phase = "backend_marker"') < script.index(
+                '"backend": backend'
+            )
+            assert script.index('phase = "codec_marker"') < script.index(
+                '"codec": codec'
+            )
+            assert kwargs == {"timeout": 30}
+            return FakeProcess()
+
+    computer = SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+    with pytest.raises(_TargetRuntimeIdentityError) as raised:
+        asyncio.run(_target_runtime_identity(computer))
+
+    assert raised.value.safe_phase == "image_object_id"
+
+
+def test_target_runtime_identity_reports_missing_sandbox_handle() -> None:
+    with pytest.raises(_TargetRuntimeIdentityError) as raised:
+        asyncio.run(_target_runtime_identity(SimpleNamespace()))
+
+    assert raised.value.safe_phase == "sandbox_handle"
 
 
 def test_x11_benchmark_bakes_daemon_source_for_nested_sandbox() -> None:
