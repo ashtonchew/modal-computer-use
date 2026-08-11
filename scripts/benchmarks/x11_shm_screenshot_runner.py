@@ -470,6 +470,15 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
                     return read_text(path)
             raise RuntimeError(f"target cgroup limit is unavailable: {paths}")
 
+        def first_cpu_limit(directories):
+            for directory in directories:
+                base = Path(directory)
+                quota_path = base / "cpu.cfs_quota_us"
+                period_path = base / "cpu.cfs_period_us"
+                if quota_path.is_file() and period_path.is_file():
+                    return read_text(quota_path), read_text(period_path)
+            raise RuntimeError(f"target CPU limit is unavailable: {directories}")
+
         phase = "native_import"
         try:
             import _modal_computer_use_x11_shm as native
@@ -479,17 +488,17 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
             if cpu_max.is_file():
                 cpu_quota, cpu_period = read_text(cpu_max).split()
             else:
-                cpu_quota = first_text((
-                    "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
-                    "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us",
-                ))
-                cpu_period = first_text((
-                    "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
-                    "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us",
+                cpu_quota, cpu_period = first_cpu_limit((
+                    "/sys/fs/cgroup/cpu",
+                    "/sys/fs/cgroup/cpu,cpuacct",
                 ))
             if cpu_quota in {"max", "-1"}:
                 raise RuntimeError("target CPU quota is unbounded")
-            cpu = int(cpu_quota) / int(cpu_period)
+            quota_usec = int(cpu_quota)
+            period_usec = int(cpu_period)
+            if quota_usec < 1 or quota_usec != period_usec:
+                raise RuntimeError("target CPU quota is not exactly one CPU")
+            cpu = quota_usec / period_usec
 
             phase = "memory_limit"
             memory_limit = first_text((
@@ -519,6 +528,8 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
                 "module_sha256": module_sha256,
                 "image_object_id": image_object_id,
                 "cpu": cpu,
+                "quota_usec": quota_usec,
+                "period_usec": period_usec,
                 "memory_bytes": memory_bytes,
                 "machine": platform.machine(),
             }
@@ -575,6 +586,17 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
         raise _TargetRuntimeIdentityError("module_sha256")
     if not str(payload.get("image_object_id", "")).startswith("im-"):
         raise _TargetRuntimeIdentityError("image_object_id")
+    quota_usec = payload.get("quota_usec")
+    period_usec = payload.get("period_usec")
+    if (
+        isinstance(quota_usec, bool)
+        or not isinstance(quota_usec, int)
+        or isinstance(period_usec, bool)
+        or not isinstance(period_usec, int)
+        or quota_usec < 1
+        or quota_usec != period_usec
+    ):
+        raise _TargetRuntimeIdentityError("cpu_limit")
     return payload
 
 

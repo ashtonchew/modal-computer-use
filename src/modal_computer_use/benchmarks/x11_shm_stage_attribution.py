@@ -91,6 +91,10 @@ class _StageAttributionFailure(RuntimeError):
         super().__init__("stage attribution diagnostic failed")
 
 
+class _CgroupEvidenceUnavailable(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class _CpuCgroupSource:
     version: str
@@ -166,7 +170,7 @@ def _parse_cpu_cgroup_paths(value: str) -> tuple[tuple[str, str], ...]:
         elif "cpuacct" in controllers.split(","):
             paths.append(("v1_cpuacct", path))
     if not paths:
-        raise RuntimeError("CPU cgroup path is unavailable")
+        raise _CgroupEvidenceUnavailable("CPU cgroup path is unavailable")
     return tuple(paths)
 
 
@@ -227,7 +231,7 @@ def _select_cpu_cgroup_source(
                 )
                 if usage_file is not None:
                     return _CpuCgroupSource(version, candidate, usage_file)
-    raise RuntimeError("CPU cgroup directory is unavailable")
+    raise _CgroupEvidenceUnavailable("CPU cgroup directory is unavailable")
 
 
 def _cgroup_source() -> _CpuCgroupSource:
@@ -388,9 +392,14 @@ async def _run_child_inner(
     if captures != CAPTURES or warmups != WARMUPS:
         raise ValueError("stage diagnostic workload is fixed")
     progress.phase = "cgroup_directory"
-    cgroup_source = _cgroup_source()
-    progress.phase = "cpu_limit"
-    cpu_limit = _cpu_max(cgroup_source)
+    try:
+        cgroup_source = _cgroup_source()
+    except (OSError, _CgroupEvidenceUnavailable):
+        cgroup_source = None
+        cpu_limit = None
+    else:
+        progress.phase = "cpu_limit"
+        cpu_limit = _cpu_max(cgroup_source)
     progress.phase = "native_import"
     native = importlib.import_module("_modal_computer_use_x11_shm")
     progress.phase = "module_identity"
@@ -409,26 +418,37 @@ async def _run_child_inner(
     if process is None or not isinstance(process.pid, int):
         raise RuntimeError("timed worker identity is unavailable")
     worker_before = _process_identity(process.pid)
-    progress.phase = "worker_cgroup"
-    worker_cgroup_same = set(_cpu_cgroup_paths(process.pid)) == set(
-        _cpu_cgroup_paths()
-    )
-    if not worker_cgroup_same:
-        raise RuntimeError("timed worker does not share the diagnostic cgroup")
+    worker_cgroup_same = None
+    if cgroup_source is not None:
+        progress.phase = "worker_cgroup"
+        try:
+            worker_cgroup_same = set(_cpu_cgroup_paths(process.pid)) == set(
+                _cpu_cgroup_paths()
+            )
+        except (OSError, _CgroupEvidenceUnavailable):
+            cgroup_source = None
+            cpu_limit = None
+        else:
+            if not worker_cgroup_same:
+                raise RuntimeError("timed worker does not share the diagnostic cgroup")
     rows: list[dict[str, Any]] = []
     lane_hashes: dict[str, bytes] = {}
     payload_sizes: dict[str, list[int]] = {"full": [], "region": []}
     progress.phase = "cgroup_before"
-    cgroup_before = _cpu_stat(cgroup_source)
+    cgroup_before = _cpu_stat(cgroup_source) if cgroup_source is not None else None
     worker_after = None
     try:
         for index in range(warmups + captures):
             lane = "full" if index % 2 == 0 else "region"
             geometry = (0, 0, 1024, 768) if lane == "full" else (7, 9, 511, 383)
             measured = index >= warmups
-            if measured:
+            if measured and cgroup_source is not None:
                 progress.phase = "request_cgroup"
-            cpu_before_request = _cpu_stat(cgroup_source) if measured else None
+            cpu_before_request = (
+                _cpu_stat(cgroup_source)
+                if measured and cgroup_source is not None
+                else None
+            )
             progress.phase = (
                 f"measured_{lane}_capture" if measured else f"warmup_{lane}_capture"
             )
@@ -439,9 +459,13 @@ async def _run_child_inner(
                 width=geometry[2],
                 height=geometry[3],
             )
-            if measured:
+            if measured and cgroup_source is not None:
                 progress.phase = "request_cgroup"
-            cpu_after_request = _cpu_stat(cgroup_source) if measured else None
+            cpu_after_request = (
+                _cpu_stat(cgroup_source)
+                if measured and cgroup_source is not None
+                else None
+            )
             progress.phase = "frame_stability"
             digest = hashlib.sha256(data).digest()
             expected_digest = lane_hashes.setdefault(lane, digest)
@@ -449,21 +473,30 @@ async def _run_child_inner(
                 raise RuntimeError("captured frame changed during the fixed diagnostic")
             if not measured:
                 continue
+            if cgroup_source is not None:
+                progress.phase = "request_cgroup"
+            request_cgroup_delta: dict[str, int | None]
             if cpu_before_request is None or cpu_after_request is None:
-                raise RuntimeError("per-request cgroup evidence is unavailable")
-            progress.phase = "request_cgroup"
-            cgroup_delta = {
-                field: cpu_after_request[field] - cpu_before_request[field]
-                for field in CGROUP_FIELDS
-            }
-            if any(value < 0 for value in cgroup_delta.values()):
-                raise RuntimeError("cgroup counters regressed")
+                request_cgroup_delta = {field: None for field in CGROUP_FIELDS}
+            else:
+                request_cgroup_delta = {
+                    field: cpu_after_request[field] - cpu_before_request[field]
+                    for field in CGROUP_FIELDS
+                }
+                if any(
+                    value is not None and value < 0
+                    for value in request_cgroup_delta.values()
+                ):
+                    raise RuntimeError("cgroup counters regressed")
             rows.append(
                 {
                     "schedule_index": index - warmups,
                     "lane": lane,
                     **stages,
-                    **{f"cgroup_{key}_delta": value for key, value in cgroup_delta.items()},
+                    **{
+                        f"cgroup_{key}_delta": value
+                        for key, value in request_cgroup_delta.items()
+                    },
                 }
             )
             payload_sizes[lane].append(len(data))
@@ -485,12 +518,15 @@ async def _run_child_inner(
     if worker_after is None:
         raise RuntimeError("terminal timed worker identity is unavailable")
     progress.phase = "cgroup_after"
-    cgroup_after = _cpu_stat(cgroup_source)
-    cgroup_delta = {
-        field: cgroup_after[field] - cgroup_before[field] for field in CGROUP_FIELDS
-    }
-    if any(value < 0 for value in cgroup_delta.values()):
-        raise RuntimeError("aggregate cgroup counters regressed")
+    cgroup_after = _cpu_stat(cgroup_source) if cgroup_source is not None else None
+    if cgroup_before is None or cgroup_after is None:
+        cgroup_delta = None
+    else:
+        cgroup_delta = {
+            field: cgroup_after[field] - cgroup_before[field] for field in CGROUP_FIELDS
+        }
+        if any(value < 0 for value in cgroup_delta.values()):
+            raise RuntimeError("aggregate cgroup counters regressed")
     progress.phase = "summary"
     tail_schedule = [
         {
@@ -520,7 +556,8 @@ async def _run_child_inner(
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_cgroup_same": worker_cgroup_same,
-        "cgroup_version": cgroup_source.version,
+        "cgroup_available": cgroup_source is not None,
+        "cgroup_version": cgroup_source.version if cgroup_source is not None else None,
         "cpu_max": cpu_limit,
         "cgroup_cpu_stat_before": cgroup_before,
         "cgroup_cpu_stat_after": cgroup_after,
@@ -654,6 +691,8 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "module_sha256",
         "image_object_id",
         "cpu",
+        "quota_usec",
+        "period_usec",
         "memory_bytes",
         "machine",
     }
@@ -663,6 +702,12 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
     image_id = value["image_object_id"]
     machine = value["machine"]
     cpu = _finite_nonnegative(value["cpu"], "target cpu")
+    quota_usec = _bounded_count(
+        value["quota_usec"], "target CPU quota", maximum=2**31 - 1
+    )
+    period_usec = _bounded_count(
+        value["period_usec"], "target CPU period", maximum=2**31 - 1
+    )
     memory_bytes = _bounded_count(
         value["memory_bytes"], "target memory", maximum=16 * 1024**3
     )
@@ -676,6 +721,8 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         or not image_id.startswith("im-")
         or len(image_id) > 64
         or cpu != 1.0
+        or quota_usec < 1
+        or quota_usec != period_usec
         or memory_bytes != 2048 * 1024**2
         or not isinstance(machine, str)
         or not 1 <= len(machine) <= 32
@@ -688,6 +735,8 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "module_sha256": module_sha,
         "image_object_id": image_id,
         "cpu": cpu,
+        "quota_usec": quota_usec,
+        "period_usec": period_usec,
         "memory_bytes": memory_bytes,
         "machine": machine,
     }
@@ -780,26 +829,53 @@ def build_artifact(
             worker_after = _validate_identity(observation.get("worker_identity_after"))
             if worker_before != worker_after:
                 raise ValueError("stage diagnostic worker identity changed")
-            if observation.get("worker_cgroup_same") is not True:
-                raise ValueError("stage diagnostic worker cgroup changed")
-            cgroup_version = observation.get("cgroup_version")
-            if cgroup_version not in {"v1", "v2"}:
-                raise ValueError("stage diagnostic cgroup version is invalid")
-            cpu_max = _validate_cpu_max(observation.get("cpu_max"))
-            cgroup_before = _validate_cgroup(
-                observation.get("cgroup_cpu_stat_before"), "cgroup before"
-            )
-            cgroup_after = _validate_cgroup(
-                observation.get("cgroup_cpu_stat_after"), "cgroup after"
-            )
-            cgroup_delta = _validate_cgroup(
-                observation.get("cgroup_cpu_stat_delta"), "cgroup delta"
-            )
-            if any(
-                cgroup_after[field] - cgroup_before[field] != cgroup_delta[field]
-                for field in CGROUP_FIELDS
-            ):
-                raise ValueError("aggregate cgroup evidence is inconsistent")
+            cgroup_available = observation.get("cgroup_available")
+            if not isinstance(cgroup_available, bool):
+                raise ValueError("stage diagnostic cgroup availability is invalid")
+            if cgroup_available:
+                if observation.get("worker_cgroup_same") is not True:
+                    raise ValueError("stage diagnostic worker cgroup changed")
+                cgroup_version = observation.get("cgroup_version")
+                if cgroup_version not in {"v1", "v2"}:
+                    raise ValueError("stage diagnostic cgroup version is invalid")
+                cpu_max = _validate_cpu_max(observation.get("cpu_max"))
+                cgroup_before = _validate_cgroup(
+                    observation.get("cgroup_cpu_stat_before"), "cgroup before"
+                )
+                cgroup_after = _validate_cgroup(
+                    observation.get("cgroup_cpu_stat_after"), "cgroup after"
+                )
+                cgroup_delta = _validate_cgroup(
+                    observation.get("cgroup_cpu_stat_delta"), "cgroup delta"
+                )
+                if any(
+                    cgroup_after[field] - cgroup_before[field] != cgroup_delta[field]
+                    for field in CGROUP_FIELDS
+                ):
+                    raise ValueError("aggregate cgroup evidence is inconsistent")
+                worker_cgroup_same: bool | None = True
+            else:
+                unavailable_keys = {
+                    "worker_cgroup_same",
+                    "cgroup_version",
+                    "cpu_max",
+                    "cgroup_cpu_stat_before",
+                    "cgroup_cpu_stat_after",
+                    "cgroup_cpu_stat_delta",
+                }
+                if not unavailable_keys.issubset(observation):
+                    raise ValueError("unavailable cgroup evidence is incomplete")
+                if any(
+                    observation.get(key) is not None
+                    for key in unavailable_keys
+                ):
+                    raise ValueError("unavailable cgroup evidence is inconsistent")
+                worker_cgroup_same = None
+                cgroup_version = None
+                cpu_max = None
+                cgroup_before = None
+                cgroup_after = None
+                cgroup_delta = None
             payload_bytes = _validate_payload_bytes(observation.get("payload_bytes"))
             summaries_value = observation.get("summaries")
             if not isinstance(summaries_value, Mapping) or set(summaries_value) != {
@@ -923,9 +999,16 @@ def build_artifact(
                     raise ValueError("stage tail lane differs from fixed schedule")
                 for field in CGROUP_FIELDS:
                     key = f"cgroup_{field}_delta"
-                    retained_row[key] = _bounded_count(
-                        row.get(key), key, maximum=2**63 - 1
-                    )
+                    if key not in row:
+                        raise ValueError("stage tail cgroup evidence is incomplete")
+                    if cgroup_available:
+                        retained_row[key] = _bounded_count(
+                            row.get(key), key, maximum=2**63 - 1
+                        )
+                    elif row.get(key) is not None:
+                        raise ValueError("unavailable row cgroup evidence is inconsistent")
+                    else:
+                        retained_row[key] = None
                 tail_schedule.append(retained_row)
             controller_summary = summaries["combined"]["metrics"]["controller_total_ms"]
             if len(tail_schedule) != controller_summary["over_50_count"]:
@@ -942,7 +1025,8 @@ def build_artifact(
                     "target_identity": target_identity,
                     "worker_identity_before": worker_before,
                     "worker_identity_after": worker_after,
-                    "worker_cgroup_same": True,
+                    "worker_cgroup_same": worker_cgroup_same,
+                    "cgroup_available": cgroup_available,
                     "cgroup_version": cgroup_version,
                     "summaries": summaries,
                     "tail_schedule": tail_schedule,
@@ -983,7 +1067,7 @@ def build_artifact(
         and retained_provenance is not None
     )
     return {
-        "schema_version": "x11-shm-stage-attribution.v1",
+        "schema_version": "x11-shm-stage-attribution.v2",
         "benchmark": "x11-shm-stage-attribution",
         "status": "complete" if passed else "rejected",
         "passed": passed,
@@ -995,7 +1079,11 @@ def build_artifact(
         "daemon_route_excluded": True,
         "instrumentation_intrusive": True,
         "lane_order_confounded": True,
-        "cgroup_scope": "sandbox-all-processes",
+        "cgroup_scope": (
+            "sandbox-all-processes"
+            if retained.get("cgroup_available") is True
+            else "unavailable"
+        ),
         "requested_source": "mss",
         "diagnostic_source": "x11-shm",
         "warmups_requested": WARMUPS,
