@@ -291,6 +291,71 @@ def test_runtime_limits_use_namespace_v2_membership_without_cpu_stat(
     assert evidence.cgroup_resolution == "namespace-root"
 
 
+def test_runtime_limits_accepts_exact_two_cpu_quota_for_ablation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cgroup = tmp_path / "sandbox"
+    cgroup.mkdir()
+    (cgroup / "cpu.max").write_text("200000 100000\n", encoding="utf-8")
+    (cgroup / "memory.max").write_text(str(2048 * 1024**2), encoding="utf-8")
+    monkeypatch.setattr(
+        probe,
+        "_v2_cgroup_directory",
+        lambda: (cgroup, "namespace-root"),
+    )
+    probe.configure_resources(2.0)
+    try:
+        evidence = probe._runtime_limits()
+    finally:
+        probe.configure_resources(1.0)
+
+    assert evidence.cgroup_available is True
+    assert evidence.quota_usec == 200_000
+    assert evidence.period_usec == 100_000
+
+
+def test_target_identity_accepts_exact_two_cpu_quota_for_ablation() -> None:
+    target = {
+        **TARGET_IDENTITY,
+        "cpu": 2.0,
+        "quota_usec": 200_000,
+        "period_usec": 100_000,
+    }
+    probe.configure_resources(2.0)
+    try:
+        identity = probe._validate_target_identity(target)
+    finally:
+        probe.configure_resources(1.0)
+
+    assert identity["cpu"] == 2.0
+    assert identity["quota_usec"] == 200_000
+    assert identity["period_usec"] == 100_000
+
+
+def test_artifact_accepts_attested_two_cpu_ablation_contract() -> None:
+    resources = {"cpu": 2.0, "memory_bytes": 2048 * 1024**2}
+    observation = _observation()
+    observation["configured_resources"] = resources
+    observation["target_identity"] = {
+        **TARGET_IDENTITY,
+        "cpu": 2.0,
+        "quota_usec": 200_000,
+        "period_usec": 100_000,
+    }
+    provenance = {**PROVENANCE, "configured_cpu": 2.0}
+
+    artifact = probe.build_artifact(
+        observation,
+        TERMINAL_CLEANUP,
+        provenance,
+        configured_resources=resources,
+    )
+
+    assert artifact["status"] == "complete"
+    assert artifact["target_identity"]["cpu"] == 2.0
+    assert artifact["target_identity"]["quota_usec"] == 200_000
+
+
 def test_v2_cgroup_directory_parses_root_and_nested_memberships(tmp_path: Path) -> None:
     root_mount = f"24 23 0:22 / {tmp_path} rw - cgroup2 cgroup rw\n"
     assert probe._v2_cgroup_directory("0::/\n", mountinfo_text=root_mount, root=tmp_path) == (
