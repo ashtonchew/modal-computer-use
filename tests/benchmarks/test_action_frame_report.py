@@ -112,7 +112,6 @@ def _artifact() -> dict[str, object]:
 def _step_source_artifact() -> dict[str, object]:
     samples = [40.0 + (index % 4) for index in range(30)]
     return {
-        "source_sha": SOURCE_SHA,
         "benchmark": "computer-step-promotion",
         "status": "complete",
         "failures": [],
@@ -126,6 +125,7 @@ def _step_source_artifact() -> dict[str, object]:
                 "83599900ae670680c7d84271000b03114940c492d935c26b5f0999a281958296"
             ),
             "operation_transport": "computer-step-envelope-v1",
+            "image_identity": f"inline-source-{SOURCE_SHA}-config-0123456789abcdef",
             "caller_topology": "one-application-owned-modal-function",
             "requested_placement": {"cloud": "aws", "region": "us-west-2"},
             "observed_placement": {
@@ -138,14 +138,7 @@ def _step_source_artifact() -> dict[str, object]:
             },
             "screenshot": {
                 "format": "png",
-                "width": 1024,
-                "height": 768,
                 "show_cursor": False,
-            },
-            "sdk": {
-                "package": "modal-computer-use",
-                "version": "2.0.0",
-                "retry_policy": "provider-default",
             },
         },
         "observations": [
@@ -283,6 +276,13 @@ def test_assembler_binds_fresh_step_provider_and_cleanup_inputs() -> None:
     assert result["status"] == "eligible"
     assert [arm["provider"] for arm in result["arms"]] == ["modal-daemon", "tzafon"]
     assert result["arms"][0]["summary_ms"]["p50"] == 41.0
+    assert result["arms"][0]["screenshot"] == {
+        "format": "png",
+        "width": None,
+        "height": None,
+        "show_cursor": False,
+    }
+    assert result["arms"][0]["sdk"]["package"] == "modal-computer-use"
     assert result["arms"][1]["resources"] == {
         "cpu": None,
         "memory_mib": None,

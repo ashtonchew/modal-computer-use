@@ -12,6 +12,7 @@ import math
 import re
 import statistics
 from datetime import date
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 ACTION_FRAME_SCHEMA_VERSION = 1
@@ -196,7 +197,7 @@ def assemble_action_frame_report(
     report_source_sha = _require_source_sha(source_sha, "assembly source_sha")
     _validate_report_date(evidence_date)
     digests = _validated_input_digest_map(input_artifact_digests)
-    _validate_input_source_sha(step_artifact, report_source_sha, "step artifact")
+    _validate_step_input_source_sha(step_artifact, report_source_sha)
     _validate_input_source_sha(provider_artifact, report_source_sha, "provider artifact")
     _validate_cleanup_verification(cleanup_verification, report_source_sha)
 
@@ -305,12 +306,18 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
         cursor_label = (
             str(cursor_policy).lower() if isinstance(cursor_policy, bool) else "unknown"
         )
+        dimensions = (
+            f"{screenshot['width']}x{screenshot['height']}"
+            if isinstance(screenshot["width"], int)
+            and isinstance(screenshot["height"], int)
+            else "dimensions unknown"
+        )
         lines.append(
             f"| {arm['provider']} | {sdk['package']} {sdk['version']} | "
             f"{sdk['retry_policy']} | {topology['caller']} | "
             f"{topology['requested_region']} | "
             f"{topology['observed_region']} | {screenshot['format'].upper()} "
-            f"{screenshot['width']}x{screenshot['height']} cursor="
+            f"{dimensions} cursor="
             f"{cursor_label} | {_format_cpu(resources['cpu'])} | "
             f"{_format_memory(resources['memory_mib'])} | {shape['sdk_calls']} | "
             f"{shape['transport_requests']} |"
@@ -662,10 +669,16 @@ def _validate_screenshot(screenshot: dict[str, Any]) -> None:
         raise ActionFrameReportError("screenshot format must be png or jpeg")
     width = screenshot.get("width")
     height = screenshot.get("height")
-    if isinstance(width, bool) or not isinstance(width, int) or width <= 0:
-        raise ActionFrameReportError("screenshot width must be a positive integer")
-    if isinstance(height, bool) or not isinstance(height, int) or height <= 0:
-        raise ActionFrameReportError("screenshot height must be a positive integer")
+    if (width is None) != (height is None):
+        raise ActionFrameReportError("screenshot dimensions must both be recorded or unknown")
+    if width is not None and (
+        isinstance(width, bool) or not isinstance(width, int) or width <= 0
+    ):
+        raise ActionFrameReportError("screenshot width must be positive or unknown")
+    if height is not None and (
+        isinstance(height, bool) or not isinstance(height, int) or height <= 0
+    ):
+        raise ActionFrameReportError("screenshot height must be positive or unknown")
     if screenshot.get("show_cursor") is not None and not isinstance(
         screenshot.get("show_cursor"), bool
     ):
@@ -717,6 +730,18 @@ def _validated_input_digest_map(value: dict[str, str]) -> list[dict[str, str]]:
 def _validate_input_source_sha(value: dict[str, Any], source_sha: str, label: str) -> None:
     if _require_source_sha(value.get("source_sha"), f"{label} source_sha") != source_sha:
         raise ActionFrameReportError(f"{label} source SHA differs from assembly source")
+
+
+def _validate_step_input_source_sha(value: dict[str, Any], source_sha: str) -> None:
+    direct = value.get("source_sha")
+    if direct is not None:
+        _validate_input_source_sha(value, source_sha, "step artifact")
+        return
+    configuration = _mapping(value.get("configuration"), "step configuration")
+    image_identity = configuration.get("image_identity")
+    expected_prefix = f"inline-source-{source_sha}-config-"
+    if not isinstance(image_identity, str) or not image_identity.startswith(expected_prefix):
+        raise ActionFrameReportError("step artifact image identity differs from assembly source")
 
 
 def _validate_cleanup_verification(value: dict[str, Any], source_sha: str) -> None:
@@ -782,10 +807,15 @@ def _require_common_action_configuration(configuration: dict[str, Any], label: s
 
 def _screenshot_from_configuration(configuration: dict[str, Any], label: str) -> dict[str, Any]:
     raw = _mapping(configuration.get("screenshot"), label)
-    for key in ("format", "width", "height", "show_cursor"):
+    for key in ("format", "show_cursor"):
         if key not in raw:
             raise ActionFrameReportError(f"{label} is missing {key}")
-    screenshot = {key: raw[key] for key in _SCREENSHOT_KEYS}
+    screenshot = {
+        "format": raw["format"],
+        "width": raw.get("width"),
+        "height": raw.get("height"),
+        "show_cursor": raw["show_cursor"],
+    }
     _validate_screenshot(screenshot)
     return screenshot
 
@@ -830,7 +860,20 @@ def _resources_from_configuration(configuration: dict[str, Any], label: str) -> 
 
 
 def _sdk_from_configuration(configuration: dict[str, Any], label: str) -> dict[str, str]:
-    sdk = _mapping(configuration.get("sdk"), f"{label} SDK")
+    sdk_value = configuration.get("sdk")
+    if sdk_value is None:
+        try:
+            package_version = version("modal-computer-use")
+        except PackageNotFoundError as exc:
+            raise ActionFrameReportError(
+                "modal-computer-use package version is unavailable"
+            ) from exc
+        sdk_value = {
+            "package": "modal-computer-use",
+            "version": package_version,
+            "retry_policy": "no-mutation-retry",
+        }
+    sdk = _mapping(sdk_value, f"{label} SDK")
     result = {
         "package": _require_version(sdk.get("package"), f"{label} SDK package"),
         "version": _require_version(sdk.get("version"), f"{label} SDK version"),
