@@ -72,6 +72,28 @@ def test_inventory_ids_are_normalized_without_printing_objects() -> None:
     assert runner.extract_resource_ids(values) == {"sandbox-a", "sandbox-b", "sandbox-c"}
 
 
+def test_inventory_flattens_object_items_and_cursor_pages() -> None:
+    runner = _load_runner()
+
+    object_listing = SimpleNamespace(items=[{"id": "daytona-a"}])
+    assert runner.extract_resource_ids(runner._flatten_listing(object_listing)) == {"daytona-a"}
+
+    class Paginator:
+        def __init__(self) -> None:
+            self.has_next = True
+            self._pages = [[{"sandbox_id": "e2b-a"}], [{"sandbox_id": "e2b-b"}]]
+
+        def next_items(self) -> list[dict[str, str]]:
+            page = self._pages.pop(0)
+            self.has_next = bool(self._pages)
+            return page
+
+    assert runner.extract_resource_ids(runner._flatten_listing(Paginator())) == {
+        "e2b-a",
+        "e2b-b",
+    }
+
+
 def test_cleanup_verification_is_fail_closed() -> None:
     runner = _load_runner()
 

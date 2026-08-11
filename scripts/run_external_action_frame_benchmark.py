@@ -209,6 +209,28 @@ def _flatten_listing(value: Any) -> list[Any]:
         return []
     if isinstance(value, (str, bytes, bytearray)):
         return []
+    # Daytona returns an object with an ``items`` attribute.  E2B returns a
+    # cursor paginator whose pages are exposed through ``next_items``.  Treat
+    # both as list responses instead of silently converting them to an empty
+    # inventory (which would make leaked resources look clean).
+    next_items = getattr(value, "next_items", None)
+    has_next = getattr(value, "has_next", None)
+    if callable(next_items) and isinstance(has_next, bool):
+        items: list[Any] = []
+        page_count = 0
+        while bool(getattr(value, "has_next", False)):
+            page_count += 1
+            if page_count > 1000:
+                raise InventoryError("provider resource inventory pagination exceeded its bound")
+            page = next_items()
+            if page is value:
+                raise InventoryError("provider resource inventory returned its paginator")
+            items.extend(_flatten_listing(page))
+        return items
+    for key in ("items", "data", "sandboxes", "computers", "results"):
+        child = getattr(value, key, None)
+        if child is not None and child is not value:
+            return _flatten_listing(child)
     if isinstance(value, Iterable):
         return list(value)
     if _resource_id(value):
