@@ -21,14 +21,8 @@ runner = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(runner)
 
 
-def test_base_runner_paths_include_modal_scripts_mount() -> None:
-    paths = runner._base_runner_paths(
-        Path("/root/x11_shm_direct_vs_spawned_cpu_ablation_runner.py"),
-        Path("/scripts"),
-    )
-
-    assert Path("/root/scripts/benchmarks/x11_shm_direct_vs_spawned_runner.py") in paths
-    assert Path("/scripts/benchmarks/x11_shm_direct_vs_spawned_runner.py") in paths
+def test_base_runner_is_a_static_sibling_import_for_modal_automount() -> None:
+    assert runner.base_runner.__name__ == "x11_shm_direct_vs_spawned_runner"
 
 
 def test_outer_deadline_leaves_cleanup_slack_for_both_profiles() -> None:
