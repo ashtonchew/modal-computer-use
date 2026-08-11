@@ -58,8 +58,12 @@ CLEANUP_TIMEOUT_SECONDS = 2.5
 ARMS: tuple[ArmName, ArmName] = ("direct_native", "spawned_worker")
 DIRECT_ARM: ArmName = "direct_native"
 SPAWNED_ARM: ArmName = "spawned_worker"
-SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v2"
+SCHEMA_VERSION = "x11-shm-direct-vs-spawned.v3"
 BENCHMARK_NAME = "x11-shm-direct-vs-spawned"
+CONFIGURED_RESOURCES = {
+    "cpu": 1.0,
+    "memory_bytes": 2048 * 1024**2,
+}
 EXPECTED_MODULE_IDENTITY = {
     "backend": "x11-shm",
     "codec": "png-deflate-level1-no-filter",
@@ -78,6 +82,9 @@ SAFE_FAILURE_PHASES = frozenset(
         "target_cpu_limit",
         "target_memory_limit",
         "target_limit_contract",
+        "sandbox_handle",
+        "child_result",
+        "session_start",
         "direct_session_start",
         "spawned_session_start",
         "warmup_capture",
@@ -138,7 +145,7 @@ SCOPE_CONTRACT = {
     "lane_order_confounded": True,
     "daemon_requested_source": "mss",
     "diagnostic_source": "x11-shm",
-    "cgroup_scope": "fixed-limit-only",
+    "cgroup_scope": "configured-resource-only",
     # The current worker protocol does not expose a module hash handshake;
     # bind the run to the image/source identity and record that limitation.
     "worker_module_hash_handshake": False,
@@ -175,6 +182,24 @@ class _TargetPreflightFailure(RuntimeError):
         super().__init__("target preflight failed")
 
 
+class _CgroupEvidenceUnavailable(RuntimeError):
+    """Cgroup mapping/files are unavailable, so evidence is explicitly null."""
+
+
+class _CgroupEvidenceMalformed(RuntimeError):
+    """Readable cgroup metadata is malformed and must fail closed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeLimits:
+    cgroup_available: bool
+    quota_usec: int | None
+    period_usec: int | None
+    memory_bytes: int | None
+    cgroup_version: str | None
+    cgroup_resolution: str | None
+
+
 @dataclass(frozen=True, slots=True)
 class _CaptureSample:
     payload_bytes: int
@@ -206,6 +231,29 @@ class _Progress:
         self.captures_completed = {arm: 0 for arm in ARMS}
         self.paired_prefix_samples = 0
         self.first_unpaired_pair: int | None = None
+
+
+def empty_rejected_observation(failure_phase: str) -> dict[str, Any]:
+    """Return the exact bounded envelope for a failure before child evidence."""
+
+    phase = failure_phase if failure_phase in SAFE_FAILURE_PHASES else "summary"
+    return {
+        "passed": False,
+        **SCOPE_CONTRACT,
+        "configured_resources": dict(CONFIGURED_RESOURCES),
+        "worker_cgroup_same": None,
+        "warmups_completed": {arm: 0 for arm in ARMS},
+        "captures_completed": {arm: 0 for arm in ARMS},
+        "paired_prefix_samples": 0,
+        "unpaired_after_failure_samples": 0,
+        "first_unpaired_pair": None,
+        "pixel_hash_parity": False,
+        "arms": {},
+        "retries": 0,
+        "replacement_samples": 0,
+        "failure_type": "RuntimeError",
+        "failure_phase": phase,
+    }
 
 
 def pair_order(pair_index: int) -> tuple[ArmName, ArmName]:
@@ -306,6 +354,7 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "quota_usec",
         "period_usec",
         "memory_bytes",
+        "cgroup_available",
         "cgroup_version",
         "cgroup_resolution",
         "machine",
@@ -318,6 +367,9 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
     module_sha = value["module_sha256"]
     image_id = value["image_object_id"]
     display = value["display"]
+    cgroup_available = value["cgroup_available"]
+    if not isinstance(cgroup_available, bool):
+        raise ValueError("invalid cgroup availability state")
     if (
         value["backend"] != EXPECTED_MODULE_IDENTITY["backend"]
         or value["codec"] != EXPECTED_MODULE_IDENTITY["codec"]
@@ -333,14 +385,6 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         or not isinstance(display, str)
         or not 1 <= len(display) <= 128
         or not all(character.isalnum() or character in "_.-:" for character in display)
-        or isinstance(value["cpu"], bool)
-        or not isinstance(value["cpu"], float)
-        or value["cpu"] != 1.0
-        or value["quota_usec"] != value["period_usec"]
-        or value["quota_usec"] < 1
-        or value["memory_bytes"] != 2048 * 1024**2
-        or value["cgroup_version"] != "v2"
-        or value["cgroup_resolution"] not in {"namespace-root", "namespace-relative"}
         or value["width"] != WIDTH
         or value["height"] != HEIGHT
         or not isinstance(value["machine"], str)
@@ -348,9 +392,38 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         or not all(character.isalnum() or character in "_.-" for character in value["machine"])
     ):
         raise ValueError("target identity differs from the fixed runtime")
-    quota = _bounded_count(value["quota_usec"], "target quota", maximum=2**31 - 1)
-    period = _bounded_count(value["period_usec"], "target period", maximum=2**31 - 1)
-    memory = _bounded_count(value["memory_bytes"], "target memory", maximum=16 * 1024**3)
+    if cgroup_available:
+        if (
+            value["cgroup_version"] != "v2"
+            or value["cgroup_resolution"] not in {"namespace-root", "namespace-relative"}
+            or isinstance(value["cpu"], bool)
+            or not isinstance(value["cpu"], float)
+            or value["cpu"] != 1.0
+        ):
+            raise ValueError("available cgroup evidence has no safe resolution")
+        quota = _bounded_count(value["quota_usec"], "target quota", maximum=2**31 - 1)
+        period = _bounded_count(value["period_usec"], "target period", maximum=2**31 - 1)
+        memory = _bounded_count(value["memory_bytes"], "target memory", maximum=16 * 1024**3)
+        if quota != period or quota < 1 or memory != CONFIGURED_RESOURCES["memory_bytes"]:
+            raise ValueError("available cgroup limits differ from the fixed runtime")
+        cgroup_version = "v2"
+        cgroup_resolution = value["cgroup_resolution"]
+    else:
+        if any(
+            value[field] is not None
+            for field in (
+                "quota_usec",
+                "period_usec",
+                "memory_bytes",
+                "cgroup_version",
+                "cgroup_resolution",
+            )
+        ):
+            raise ValueError("unavailable cgroup evidence must be explicitly null")
+        if value["cpu"] is not None:
+            raise ValueError("unavailable cgroup evidence must have null CPU")
+        quota = period = memory = None
+        cgroup_version = cgroup_resolution = None
     return {
         "backend": EXPECTED_MODULE_IDENTITY["backend"],
         "codec": EXPECTED_MODULE_IDENTITY["codec"],
@@ -358,17 +431,31 @@ def _validate_target_identity(value: object) -> dict[str, Any]:
         "codec_library": EXPECTED_MODULE_IDENTITY["codec_library"],
         "module_sha256": module_sha,
         "image_object_id": image_id,
-        "cpu": 1.0,
+        "cpu": 1.0 if cgroup_available else None,
         "quota_usec": quota,
         "period_usec": period,
         "memory_bytes": memory,
-        "cgroup_version": "v2",
-        "cgroup_resolution": value["cgroup_resolution"],
+        "cgroup_available": cgroup_available,
+        "cgroup_version": cgroup_version,
+        "cgroup_resolution": cgroup_resolution,
         "machine": value["machine"],
         "display": display,
         "width": WIDTH,
         "height": HEIGHT,
     }
+
+
+def _validate_configured_resources(value: object) -> dict[str, float | int]:
+    if not isinstance(value, Mapping) or set(value) != set(CONFIGURED_RESOURCES):
+        raise ValueError("invalid authoritative configured resources")
+    cpu = value["cpu"]
+    memory = value["memory_bytes"]
+    if isinstance(cpu, bool) or not isinstance(cpu, float) or cpu != 1.0:
+        raise ValueError("invalid authoritative configured CPU")
+    memory_bytes = _bounded_count(memory, "configured memory", maximum=16 * 1024**3)
+    if memory_bytes != CONFIGURED_RESOURCES["memory_bytes"]:
+        raise ValueError("invalid authoritative configured memory")
+    return {"cpu": 1.0, "memory_bytes": memory_bytes}
 
 
 def _validate_timing(value: object) -> dict[str, float]:
@@ -540,6 +627,8 @@ def _validate_rejected_envelope(observation: Mapping[str, Any]) -> dict[str, Any
         *SCOPE_CONTRACT,
         "warmups_completed",
         "captures_completed",
+        "configured_resources",
+        "worker_cgroup_same",
         "paired_prefix_samples",
         "unpaired_after_failure_samples",
         "first_unpaired_pair",
@@ -556,6 +645,12 @@ def _validate_rejected_envelope(observation: Mapping[str, Any]) -> dict[str, Any
     if observation.get("passed") is not False or observation.get("arms") != {}:
         raise ValueError("invalid rejected observation state")
     retained: dict[str, Any] = {"passed": False, "arms": {}}
+    retained["configured_resources"] = _validate_configured_resources(
+        observation.get("configured_resources")
+    )
+    if observation.get("worker_cgroup_same") is not None:
+        raise ValueError("rejected envelope cannot claim worker cgroup equality")
+    retained["worker_cgroup_same"] = None
     for key, expected in SCOPE_CONTRACT.items():
         if observation.get(key) != expected:
             raise ValueError(f"scope contract differs for {key}")
@@ -803,16 +898,35 @@ def _same_cgroup(pid: int) -> bool:
     return current == worker
 
 
-def _spawned_worker_identity(session: Any) -> dict[str, int]:
+def _spawned_worker_pid(session: Any) -> int:
     owner = getattr(session, "_session", None)
     process = getattr(owner, "_session", owner)
     process_obj = getattr(process, "_process", None)
     pid = getattr(process_obj, "pid", None)
     if not isinstance(pid, int) or pid <= 0:
         raise RuntimeError("spawned worker identity is unavailable")
-    if not _same_cgroup(pid):
-        raise RuntimeError("spawned worker cgroup differs from the target")
-    return _process_identity(pid)
+    return pid
+
+
+def _spawned_worker_identity_and_cgroup(
+    session: Any, *, verify_cgroup: bool = True
+) -> tuple[dict[str, int], bool | None]:
+    pid = _spawned_worker_pid(session)
+    try:
+        cgroup_same = _same_cgroup(pid)
+    except OSError:
+        if verify_cgroup:
+            raise RuntimeError("spawned worker cgroup is unavailable") from None
+        cgroup_same = None
+    else:
+        if not cgroup_same:
+            raise RuntimeError("spawned worker cgroup differs from the target")
+    return _process_identity(pid), cgroup_same
+
+
+def _spawned_worker_identity(session: Any, *, verify_cgroup: bool = True) -> dict[str, int]:
+    identity, _ = _spawned_worker_identity_and_cgroup(session, verify_cgroup=verify_cgroup)
+    return identity
 
 
 def _module_identity(native: Any) -> dict[str, str]:
@@ -827,20 +941,30 @@ def _v2_cgroup_directory(
     root: Path = Path("/sys/fs/cgroup"),
 ) -> tuple[Path, str]:
     if membership_text is None:
-        membership_text = Path("/proc/self/cgroup").read_text(encoding="utf-8")
+        try:
+            membership_text = Path("/proc/self/cgroup").read_text(encoding="utf-8")
+        except OSError:
+            raise _CgroupEvidenceUnavailable(
+                "target cgroup membership file is unavailable"
+            ) from None
     if mountinfo_text is None:
-        mountinfo_text = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+        try:
+            mountinfo_text = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+        except OSError:
+            raise _CgroupEvidenceUnavailable("target cgroup mount mapping is unavailable") from None
     memberships = membership_text.splitlines()
     paths = []
     for line in memberships:
         parts = line.split(":", 2)
         if len(parts) == 3 and parts[1] == "":
             paths.append(parts[2])
+    if not paths:
+        raise _CgroupEvidenceUnavailable("target cgroup v2 membership is unavailable")
     if len(paths) != 1 or not paths[0].startswith("/"):
-        raise RuntimeError("target cgroup v2 membership is unavailable")
+        raise _CgroupEvidenceMalformed("target cgroup v2 membership is malformed")
     relative = PurePosixPath(paths[0])
     if ".." in relative.parts:
-        raise RuntimeError("target cgroup v2 membership is unsafe")
+        raise _CgroupEvidenceMalformed("target cgroup v2 membership is unsafe")
     mount_roots = []
     for line in mountinfo_text.splitlines():
         before, separator, after = line.partition(" - ")
@@ -854,11 +978,13 @@ def _v2_cgroup_directory(
             and fields[4] == str(root)
         ):
             mount_roots.append(fields[3])
+    if not mount_roots:
+        raise _CgroupEvidenceUnavailable("target cgroup v2 mount mapping is unavailable")
     if len(mount_roots) != 1 or not mount_roots[0].startswith("/"):
-        raise RuntimeError("target cgroup v2 mount mapping is unavailable")
+        raise _CgroupEvidenceMalformed("target cgroup v2 mount mapping is malformed")
     mount_root = PurePosixPath(mount_roots[0])
     if ".." in mount_root.parts:
-        raise RuntimeError("target cgroup v2 mount mapping is unsafe")
+        raise _CgroupEvidenceMalformed("target cgroup v2 mount mapping is unsafe")
     # The membership path is relative to the process's cgroup namespace.  The
     # mountinfo root can be a host-coordinate path, so only use it to verify
     # the mounted filesystem type and mountpoint.
@@ -867,31 +993,52 @@ def _v2_cgroup_directory(
     return root.joinpath(*relative.parts[1:]), "namespace-relative"
 
 
-def _runtime_limits() -> tuple[int, int, int, str]:
-    """Read the exact one-CPU/2-GiB limits applied to this child."""
+def _runtime_limits() -> _RuntimeLimits:
+    """Read optional cgroup evidence without weakening configured resources.
+
+    A missing/unmappable cgroup file is represented as an explicit unavailable
+    state.  Readable malformed contents or a readable wrong limit remain hard
+    failures, so the probe never treats bad evidence as an unconstrained
+    target.
+    """
 
     try:
         directory, resolution = _v2_cgroup_directory()
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, _CgroupEvidenceUnavailable):
+        return _RuntimeLimits(False, None, None, None, None, None)
+    except _CgroupEvidenceMalformed:
         raise _TargetPreflightFailure("target_cgroup_mapping") from None
     try:
-        quota_text, period_text = (directory / "cpu.max").read_text(encoding="utf-8").split()
-        cpu_quota, cpu_period = int(quota_text), int(period_text)
-    except (OSError, ValueError):
+        cpu_text = (directory / "cpu.max").read_text(encoding="utf-8")
+    except OSError:
         raise _TargetPreflightFailure("target_cpu_limit") from None
-    if quota_text == "max":
-        raise _TargetPreflightFailure("target_cpu_limit")
-    memory_path = directory / "memory.max"
     try:
-        memory_text = memory_path.read_text(encoding="utf-8").strip()
-        memory_bytes = int(memory_text)
-    except (OSError, ValueError):
+        memory_text = (directory / "memory.max").read_text(encoding="utf-8").strip()
+    except OSError:
         raise _TargetPreflightFailure("target_memory_limit") from None
+    cpu_parts = cpu_text.split()
+    if len(cpu_parts) != 2:
+        raise _TargetPreflightFailure("target_cpu_limit")
+    quota_text, period_text = cpu_parts
+    if quota_text == "max" or period_text == "max":
+        raise _TargetPreflightFailure("target_cpu_limit")
     if memory_text in {"max", "-1"}:
         raise _TargetPreflightFailure("target_memory_limit")
-    if cpu_quota != cpu_period or cpu_quota < 1 or memory_bytes != 2048 * 1024**2:
+    try:
+        cpu_quota, cpu_period = int(quota_text), int(period_text)
+    except ValueError:
+        raise _TargetPreflightFailure("target_cpu_limit") from None
+    try:
+        memory_bytes = int(memory_text)
+    except ValueError:
+        raise _TargetPreflightFailure("target_memory_limit") from None
+    if (
+        cpu_quota != cpu_period
+        or cpu_quota < 1
+        or memory_bytes != CONFIGURED_RESOURCES["memory_bytes"]
+    ):
         raise _TargetPreflightFailure("target_limit_contract")
-    return cpu_quota, cpu_period, memory_bytes, resolution
+    return _RuntimeLimits(True, cpu_quota, cpu_period, memory_bytes, "v2", resolution)
 
 
 def _target_identity(
@@ -913,17 +1060,18 @@ def _target_identity(
         raise RuntimeError("target image identity is unavailable")
     if progress is not None:
         progress.phase = "target_cgroup_limits"
-    quota_usec, period_usec, memory_bytes, cgroup_resolution = _runtime_limits()
+    limits = _runtime_limits()
     return {
         **_module_identity(native),
         "module_sha256": module_sha,
         "image_object_id": image_id,
-        "cpu": 1.0,
-        "quota_usec": quota_usec,
-        "period_usec": period_usec,
-        "memory_bytes": memory_bytes,
-        "cgroup_version": "v2",
-        "cgroup_resolution": cgroup_resolution,
+        "cpu": 1.0 if limits.cgroup_available else None,
+        "quota_usec": limits.quota_usec,
+        "period_usec": limits.period_usec,
+        "memory_bytes": limits.memory_bytes,
+        "cgroup_available": limits.cgroup_available,
+        "cgroup_version": limits.cgroup_version,
+        "cgroup_resolution": limits.cgroup_resolution,
         "machine": platform.machine(),
         "display": display,
         "width": WIDTH,
@@ -1062,8 +1210,12 @@ async def _run_child_inner(
     captures_completed = {arm: 0 for arm in ARMS}
     session_cleanup_errors: dict[str, list[str]] = {arm: [] for arm in ARMS}
     identities_after: dict[str, dict[str, int] | None] = {}
+    # ``None`` is intentional when target cgroup discovery is unavailable;
+    # otherwise a successful spawned identity handshake must prove equality.
+    worker_cgroup_same: bool | None = None
     pixel_hashes_seen: set[str] = set()
     executors = {arm: _SessionExecutor(arm) for arm in ARMS}
+    verify_worker_cgroup = target_identity["cgroup_available"] is True
     try:
         progress.phase = "direct_session_start"
         try:
@@ -1088,10 +1240,14 @@ async def _run_child_inner(
                 lambda: SpawnedWorkerSession(display=display, width=WIDTH, height=HEIGHT),
                 executor=executors[SPAWNED_ARM].executor,
             )
-            identities_before[SPAWNED_ARM] = await _bounded_call(
-                lambda: _spawned_worker_identity(sessions[SPAWNED_ARM]),
+            spawned_before, observed_cgroup_same = await _bounded_call(
+                lambda: _spawned_worker_identity_and_cgroup(
+                    sessions[SPAWNED_ARM], verify_cgroup=verify_worker_cgroup
+                ),
                 executor=executors[SPAWNED_ARM].executor,
             )
+            worker_cgroup_same = observed_cgroup_same if verify_worker_cgroup else None
+            identities_before[SPAWNED_ARM] = spawned_before
         except BaseException as exc:
             if _is_terminal_deadline(exc):
                 raise
@@ -1185,10 +1341,14 @@ async def _run_child_inner(
                 identities_after[DIRECT_ARM] = None
         if SPAWNED_ARM in identities_before:
             try:
-                identities_after[SPAWNED_ARM] = await _bounded_call(
-                    lambda: _spawned_worker_identity(sessions[SPAWNED_ARM]),
+                spawned_after, cgroup_after = await _bounded_call(
+                    lambda: _spawned_worker_identity_and_cgroup(
+                        sessions[SPAWNED_ARM], verify_cgroup=verify_worker_cgroup
+                    ),
                     executor=executors[SPAWNED_ARM].executor,
                 )
+                identities_after[SPAWNED_ARM] = spawned_after
+                worker_cgroup_same = cgroup_after if verify_worker_cgroup else None
             except BaseException:
                 identities_after[SPAWNED_ARM] = None
         progress.phase = "session_close"
@@ -1229,8 +1389,10 @@ async def _run_child_inner(
         "display": display,
         "geometry": dict(REGION),
         **SCOPE_CONTRACT,
+        "configured_resources": dict(CONFIGURED_RESOURCES),
         "module_identity": module_identity,
         "target_identity": target_identity,
+        "worker_cgroup_same": worker_cgroup_same,
         "schedule": build_schedule(pairs=pairs),
         "warmups_completed": warmups_completed,
         "captures_completed": captures_completed,
@@ -1269,6 +1431,8 @@ async def _run_child(*, pairs: int, warmups: int, progress: _Progress) -> dict[s
         result: dict[str, Any] = {
             "passed": False,
             **SCOPE_CONTRACT,
+            "configured_resources": dict(CONFIGURED_RESOURCES),
+            "worker_cgroup_same": None,
             "warmups_completed": dict(progress.warmups_completed),
             "captures_completed": dict(progress.captures_completed),
             "paired_prefix_samples": progress.paired_prefix_samples,
@@ -1311,11 +1475,22 @@ def _summary(rows: list[dict[str, Any]]) -> dict[str, float | int]:
 
 
 def _validate_observation(observation: Mapping[str, Any]) -> dict[str, Any]:
+    target_identity = _validate_target_identity(observation.get("target_identity"))
+    worker_cgroup_same = observation.get("worker_cgroup_same")
+    if target_identity["cgroup_available"]:
+        if worker_cgroup_same is not True:
+            raise ValueError("available cgroup evidence requires worker equality")
+    elif worker_cgroup_same is not None:
+        raise ValueError("unavailable cgroup evidence requires null worker equality")
     retained: dict[str, Any] = {
         "display": observation.get("display"),
         "geometry": _validate_geometry(observation.get("geometry")),
         "module_identity": _validate_module_identity(observation.get("module_identity")),
-        "target_identity": _validate_target_identity(observation.get("target_identity")),
+        "target_identity": target_identity,
+        "worker_cgroup_same": worker_cgroup_same,
+        "configured_resources": _validate_configured_resources(
+            observation.get("configured_resources")
+        ),
         "schedule": observation.get("schedule"),
     }
     for key, expected in SCOPE_CONTRACT.items():
@@ -1450,6 +1625,8 @@ def _validate_provenance(value: Mapping[str, Any]) -> dict[str, Any]:
     revision = value.get("source_revision")
     source_sha = value.get("x11_shm_source_sha256")
     lock_sha = value.get("cargo_lock_sha256")
+    configured_cpu = value.get("configured_cpu")
+    configured_memory = value.get("configured_memory_bytes")
     if (
         not isinstance(revision, str)
         or len(revision) != 40
@@ -1462,6 +1639,10 @@ def _validate_provenance(value: Mapping[str, Any]) -> dict[str, Any]:
         or len(lock_sha) != 64
         or any(character not in "0123456789abcdef" for character in lock_sha)
         or value.get("image_identity") != "inline:browser-chromium-x11-shm"
+        or isinstance(configured_cpu, bool)
+        or not isinstance(configured_cpu, float)
+        or configured_cpu != CONFIGURED_RESOURCES["cpu"]
+        or configured_memory != CONFIGURED_RESOURCES["memory_bytes"]
     ):
         raise ValueError("invalid discriminator provenance")
     return {
@@ -1470,6 +1651,8 @@ def _validate_provenance(value: Mapping[str, Any]) -> dict[str, Any]:
         "x11_shm_source_sha256": source_sha,
         "cargo_lock_sha256": lock_sha,
         "image_identity": "inline:browser-chromium-x11-shm",
+        "configured_cpu": 1.0,
+        "configured_memory_bytes": CONFIGURED_RESOURCES["memory_bytes"],
     }
 
 
@@ -1505,6 +1688,16 @@ def build_artifact(
         retained_provenance = _validate_provenance(provenance)
     except (TypeError, ValueError):
         retained_provenance = None
+        validation_failed = True
+    if (
+        not validation_failed
+        and retained_provenance is not None
+        and retained.get("configured_resources")
+        != {
+            "cpu": retained_provenance["configured_cpu"],
+            "memory_bytes": retained_provenance["configured_memory_bytes"],
+        }
+    ):
         validation_failed = True
     try:
         retained_cleanup = _validate_cleanup(
@@ -1598,6 +1791,7 @@ def build_artifact(
         "passed": passed,
         "geometry": dict(REGION),
         **{key: retained.get(key, expected) for key, expected in SCOPE_CONTRACT.items()},
+        "configured_resources": retained.get("configured_resources"),
         "pixel_hash_parity": retained.get("pixel_hash_parity", False),
         "arms": retained.get("arms", {}),
         "warmups_completed": retained.get("warmups_completed", {arm: 0 for arm in ARMS}),
@@ -1629,6 +1823,7 @@ def build_artifact(
             )
         ),
         "target_identity": retained.get("target_identity"),
+        "worker_cgroup_same": retained.get("worker_cgroup_same"),
         "module_identity": retained.get("module_identity"),
         "display": retained.get("display"),
         "session_cleanup": retained_cleanup,
