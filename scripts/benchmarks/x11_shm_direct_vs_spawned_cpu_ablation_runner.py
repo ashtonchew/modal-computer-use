@@ -23,9 +23,13 @@ from modal_computer_use.benchmarks import (
     x11_shm_direct_vs_spawned_cpu_ablation as probe,
 )
 
-_SCRIPT_DIRECTORY = str(Path(__file__).resolve().parent)
-if _SCRIPT_DIRECTORY not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIRECTORY)
+_SCRIPT_DIRECTORIES = (
+    str(Path(__file__).resolve().parent),
+    "/opt/mcu-scripts/benchmarks",
+)
+for _script_directory in _SCRIPT_DIRECTORIES:
+    if _script_directory not in sys.path:
+        sys.path.insert(0, _script_directory)
 
 # Keep this a static import so Modal's source automount includes the sibling
 # runner in the function container as well as in local script execution.
