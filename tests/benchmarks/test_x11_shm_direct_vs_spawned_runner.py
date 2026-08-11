@@ -93,7 +93,7 @@ def test_child_nonzero_exit_cannot_retain_passed_true(monkeypatch) -> None:
             return 17
 
         async def read() -> str:
-            return '{"passed": true}'
+            return '{"passed": true, "configured_resources": {"cpu": 9.0, "memory_bytes": 1}}'
 
         return SimpleNamespace(
             wait=SimpleNamespace(aio=wait),
@@ -107,3 +107,7 @@ def test_child_nonzero_exit_cannot_retain_passed_true(monkeypatch) -> None:
     result = asyncio.run(runner._run_child(computer))
 
     assert result["passed"] is False
+    assert result["configured_resources"] == {
+        "cpu": runner.CPU,
+        "memory_bytes": runner.MEMORY_MIB * 1024**2,
+    }

@@ -30,6 +30,7 @@ from modal_computer_use.benchmarks.x11_shm_direct_vs_spawned import (
     PAIRS,
     WARMUPS,
     build_artifact,
+    empty_rejected_observation,
 )
 from modal_computer_use.config import (
     ActionConfig,
@@ -48,11 +49,21 @@ MEMORY_MIB = 2048
 WIDTH = 1024
 HEIGHT = 768
 DEPTH = 24
+CONFIGURED_RESOURCES = {
+    "cpu": CPU,
+    "memory_bytes": MEMORY_MIB * 1024**2,
+}
 RUN_TAG = f"x11-shm-direct-vs-spawned-{uuid.uuid4().hex}"
 
 _RUNNER_PATH = Path(__file__).resolve()
 PROJECT_ROOT = _RUNNER_PATH.parents[2] if len(_RUNNER_PATH.parents) > 2 else Path("/root")
 FIXTURE_PATH = _RUNNER_PATH.parent / "fixtures" / "x11_shm_chromium_fixture.html"
+
+
+def _empty_rejected_observation(failure_phase: str) -> dict[str, Any]:
+    observation = empty_rejected_observation(failure_phase)
+    observation["configured_resources"] = dict(CONFIGURED_RESOURCES)
+    return observation
 
 
 def _load_fixture_html() -> str:
@@ -130,7 +141,7 @@ def _tree_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def local_provenance() -> dict[str, str | bool]:
+def local_provenance() -> dict[str, str | bool | float | int]:
     revision = _git_output("rev-parse", "HEAD")
     clean = _git_output("status", "--porcelain") == ""
     if revision is None or len(revision) != 40 or not clean:
@@ -143,6 +154,8 @@ def local_provenance() -> dict[str, str | bool]:
             (NATIVE_SOURCE / "Cargo.lock").read_bytes()
         ).hexdigest(),
         "image_identity": "inline:browser-chromium-x11-shm",
+        "configured_cpu": CONFIGURED_RESOURCES["cpu"],
+        "configured_memory_bytes": CONFIGURED_RESOURCES["memory_bytes"],
     }
 
 
@@ -245,13 +258,10 @@ async def _read_stdout(process: Any) -> str:
 
 
 async def _run_child(computer: Any) -> dict[str, Any]:
+    authoritative_resources = dict(CONFIGURED_RESOURCES)
     sandbox = getattr(computer, "_sandbox", None)
     if sandbox is None or not hasattr(sandbox, "exec"):
-        return {
-            "passed": False,
-            "failure_type": "RuntimeError",
-            "failure_phase": "sandbox_handle",
-        }
+        return _empty_rejected_observation("sandbox_handle")
     try:
         process = await sandbox.exec.aio(
             "python",
@@ -269,15 +279,14 @@ async def _run_child(computer: Any) -> dict[str, Any]:
         value = json.loads(output) if output else {}
         if not isinstance(value, dict):
             raise ValueError("diagnostic child returned a non-object")
+        # Do not trust a child-provided resource claim.  Bind the result to
+        # this authoritative outer function/target Sandbox configuration.
+        value["configured_resources"] = authoritative_resources
         if exit_code != 0:
             value["passed"] = False
         return value
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return {
-            "passed": False,
-            "failure_type": "RuntimeError",
-            "failure_phase": "child_result",
-        }
+        return _empty_rejected_observation("child_result")
 
 
 async def _terminal_cleanup() -> dict[str, Any]:
@@ -330,11 +339,7 @@ def run() -> dict[str, Any]:
             computer = await context.__aenter__()
             observation = await _run_child(computer)
         except BaseException:
-            observation = {
-                "passed": False,
-                "failure_type": "RuntimeError",
-                "failure_phase": "session_start",
-            }
+            observation = _empty_rejected_observation("session_start")
         finally:
             try:
                 await context.__aexit__(None, None, None)

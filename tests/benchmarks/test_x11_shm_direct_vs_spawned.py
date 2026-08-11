@@ -22,6 +22,8 @@ PROVENANCE = {
     "x11_shm_source_sha256": "b" * 64,
     "cargo_lock_sha256": "c" * 64,
     "image_identity": "inline:browser-chromium-x11-shm",
+    "configured_cpu": 1.0,
+    "configured_memory_bytes": 2048 * 1024**2,
 }
 TARGET_IDENTITY = {
     "backend": "x11-shm",
@@ -34,6 +36,7 @@ TARGET_IDENTITY = {
     "quota_usec": 100_000,
     "period_usec": 100_000,
     "memory_bytes": 2048 * 1024**2,
+    "cgroup_available": True,
     "cgroup_version": "v2",
     "cgroup_resolution": "namespace-root",
     "machine": "x86_64",
@@ -127,10 +130,12 @@ def _observation(*, passed: bool = True) -> dict[str, object]:
     return {
         "passed": passed,
         **probe.SCOPE_CONTRACT,
+        "configured_resources": dict(probe.CONFIGURED_RESOURCES),
         "display": ":99",
         "geometry": dict(probe.REGION),
         "module_identity": dict(probe.EXPECTED_MODULE_IDENTITY),
         "target_identity": TARGET_IDENTITY,
+        "worker_cgroup_same": True,
         "schedule": probe.build_schedule(),
         "warmups_completed": {arm: probe.WARMUPS for arm in probe.ARMS},
         "captures_completed": {arm: probe.PAIRS for arm in probe.ARMS},
@@ -244,6 +249,8 @@ def test_artifact_retains_bounded_preflight_failure_envelope() -> None:
         **probe.SCOPE_CONTRACT,
         "warmups_completed": {arm: 0 for arm in probe.ARMS},
         "captures_completed": {arm: 0 for arm in probe.ARMS},
+        "configured_resources": dict(probe.CONFIGURED_RESOURCES),
+        "worker_cgroup_same": None,
         "paired_prefix_samples": 0,
         "unpaired_after_failure_samples": 0,
         "first_unpaired_pair": None,
@@ -275,12 +282,13 @@ def test_runtime_limits_use_namespace_v2_membership_without_cpu_stat(
         lambda: (cgroup, "namespace-root"),
     )
 
-    assert probe._runtime_limits() == (
-        100_000,
-        100_000,
-        2048 * 1024**2,
-        "namespace-root",
-    )
+    evidence = probe._runtime_limits()
+    assert evidence.cgroup_available is True
+    assert evidence.quota_usec == 100_000
+    assert evidence.period_usec == 100_000
+    assert evidence.memory_bytes == 2048 * 1024**2
+    assert evidence.cgroup_version == "v2"
+    assert evidence.cgroup_resolution == "namespace-root"
 
 
 def test_v2_cgroup_directory_parses_root_and_nested_memberships(tmp_path: Path) -> None:
@@ -313,9 +321,7 @@ def test_v2_cgroup_directory_parses_root_and_nested_memberships(tmp_path: Path) 
 @pytest.mark.parametrize(
     ("cpu_text", "memory_text", "expected_phase"),
     [
-        (None, str(2048 * 1024**2), "target_cpu_limit"),
         ("max 100000", str(2048 * 1024**2), "target_cpu_limit"),
-        ("100000 100000", None, "target_memory_limit"),
         ("100000 100000", "max", "target_memory_limit"),
         ("100000 200000", str(2048 * 1024**2), "target_limit_contract"),
         ("100000 100000", str(1024 * 1024**2), "target_limit_contract"),
@@ -340,6 +346,57 @@ def test_runtime_limits_report_bounded_preflight_phase(
         probe._runtime_limits()
 
     assert exc_info.value.phase == expected_phase
+
+
+def test_runtime_limits_downgrade_only_when_cgroup_discovery_is_unavailable(
+    monkeypatch,
+) -> None:
+    def unavailable() -> tuple[Path, str]:
+        raise probe._CgroupEvidenceUnavailable("discovery unavailable")
+
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", unavailable)
+
+    evidence = probe._runtime_limits()
+
+    assert evidence == probe._RuntimeLimits(False, None, None, None, None, None)
+
+
+def test_runtime_limits_mapped_missing_cpu_file_is_hard(monkeypatch, tmp_path: Path) -> None:
+    cgroup = tmp_path / "sandbox"
+    cgroup.mkdir()
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", lambda: (cgroup, "namespace-root"))
+
+    with pytest.raises(probe._TargetPreflightFailure) as exc_info:
+        probe._runtime_limits()
+
+    assert exc_info.value.phase == "target_cpu_limit"
+
+
+def test_runtime_limits_mapped_missing_memory_file_is_hard(monkeypatch, tmp_path: Path) -> None:
+    cgroup = tmp_path / "sandbox"
+    cgroup.mkdir()
+    (cgroup / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", lambda: (cgroup, "namespace-root"))
+
+    with pytest.raises(probe._TargetPreflightFailure) as exc_info:
+        probe._runtime_limits()
+
+    assert exc_info.value.phase == "target_memory_limit"
+
+
+def test_runtime_limits_downgrade_when_mapping_file_is_unavailable(monkeypatch) -> None:
+    def unavailable() -> tuple[Path, str]:
+        raise probe._CgroupEvidenceUnavailable("mapping unavailable")
+
+    monkeypatch.setattr(probe, "_v2_cgroup_directory", unavailable)
+
+    evidence = probe._runtime_limits()
+
+    assert evidence.cgroup_available is False
+    assert evidence.cgroup_resolution is None
+    assert evidence.quota_usec is None
+    assert evidence.period_usec is None
+    assert evidence.memory_bytes is None
 
 
 def test_v2_cgroup_directory_rejects_ambiguous_or_unsafe_memberships(tmp_path: Path) -> None:
@@ -369,12 +426,98 @@ def test_artifact_rejects_unknown_cgroup_resolution() -> None:
     assert artifact["failure_type"] == "EvidenceValidationError"
 
 
+def test_artifact_accepts_explicit_unavailable_cgroup_evidence() -> None:
+    observation = _observation()
+    observation["target_identity"] = {
+        **TARGET_IDENTITY,
+        "cpu": None,
+        "cgroup_available": False,
+        "quota_usec": None,
+        "period_usec": None,
+        "memory_bytes": None,
+        "cgroup_version": None,
+        "cgroup_resolution": None,
+    }
+    observation["worker_cgroup_same"] = None
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "complete"
+    assert artifact["target_identity"]["cgroup_available"] is False
+    assert artifact["target_identity"]["cpu"] is None
+    assert artifact["target_identity"]["cgroup_resolution"] is None
+    assert artifact["target_identity"]["quota_usec"] is None
+    assert artifact["target_identity"]["period_usec"] is None
+    assert artifact["target_identity"]["memory_bytes"] is None
+    assert artifact["cgroup_scope"] == "configured-resource-only"
+    assert artifact["schema_version"] == "x11-shm-direct-vs-spawned.v3"
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"cgroup_available": False, "quota_usec": 100_000},
+        {"cgroup_available": True, "quota_usec": None, "period_usec": None, "memory_bytes": None},
+    ],
+)
+def test_artifact_rejects_inconsistent_cgroup_tri_state(patch: dict[str, object]) -> None:
+    observation = _observation()
+    target = {
+        **TARGET_IDENTITY,
+        "cpu": None,
+        "cgroup_available": False,
+        "quota_usec": None,
+        "period_usec": None,
+        "memory_bytes": None,
+        "cgroup_version": None,
+        "cgroup_resolution": None,
+    }
+    target.update(patch)
+    observation["target_identity"] = target
+
+    artifact = probe.build_artifact(observation, TERMINAL_CLEANUP, PROVENANCE)
+
+    assert artifact["status"] == "rejected"
+    assert artifact["failure_type"] == "EvidenceValidationError"
+
+
 def test_spawned_worker_identity_rejects_different_cgroup(monkeypatch) -> None:
     session = SimpleNamespace(_session=SimpleNamespace(_process=SimpleNamespace(pid=99)))
     monkeypatch.setattr(probe, "_same_cgroup", lambda _pid: False)
 
     with pytest.raises(RuntimeError, match="cgroup differs"):
         probe._spawned_worker_identity(session)
+
+
+def test_spawned_worker_identity_continues_when_cgroup_is_unreadable(monkeypatch) -> None:
+    session = SimpleNamespace(_session=SimpleNamespace(_process=SimpleNamespace(pid=99)))
+    monkeypatch.setattr(
+        probe,
+        "_same_cgroup",
+        lambda _pid: (_ for _ in ()).throw(OSError("cgroup unavailable")),
+    )
+    monkeypatch.setattr(
+        probe,
+        "_process_identity",
+        lambda _pid: {"pid": 99, "starttime_ticks": 1},
+    )
+
+    identity, cgroup_same = probe._spawned_worker_identity_and_cgroup(session, verify_cgroup=False)
+    assert identity == {
+        "pid": 99,
+        "starttime_ticks": 1,
+    }
+    assert cgroup_same is None
+
+
+def test_spawned_worker_identity_rejects_readable_mismatch_when_limits_unavailable(
+    monkeypatch,
+) -> None:
+    session = SimpleNamespace(_session=SimpleNamespace(_process=SimpleNamespace(pid=99)))
+    monkeypatch.setattr(probe, "_same_cgroup", lambda _pid: False)
+
+    with pytest.raises(RuntimeError, match="cgroup differs"):
+        probe._spawned_worker_identity_and_cgroup(session, verify_cgroup=False)
 
 
 def test_artifact_rejects_nonpositive_process_identity_and_boolean_cpu() -> None:
