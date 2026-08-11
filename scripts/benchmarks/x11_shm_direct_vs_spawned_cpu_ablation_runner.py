@@ -9,8 +9,6 @@ two sanitized observations into one non-gating ablation artifact.
 from __future__ import annotations
 
 import asyncio
-import importlib
-import importlib.util
 import json
 import os
 import sys
@@ -25,41 +23,13 @@ from modal_computer_use.benchmarks import (
     x11_shm_direct_vs_spawned_cpu_ablation as probe,
 )
 
+_SCRIPT_DIRECTORY = str(Path(__file__).resolve().parent)
+if _SCRIPT_DIRECTORY not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIRECTORY)
 
-def _base_runner_paths(
-    script_path: Path = Path(__file__),
-    scripts_mount: Path = Path("/scripts"),
-) -> tuple[Path, ...]:
-    filename = "x11_shm_direct_vs_spawned_runner.py"
-    parent = script_path.resolve().parent
-    candidates = (
-        parent / filename,
-        parent / "scripts" / "benchmarks" / filename,
-        scripts_mount / "benchmarks" / filename,
-    )
-    return tuple(dict.fromkeys(candidates))
-
-
-def _load_base_runner() -> Any:
-    try:
-        return importlib.import_module("x11_shm_direct_vs_spawned_runner")
-    except ModuleNotFoundError as exc:
-        if exc.name != "x11_shm_direct_vs_spawned_runner":
-            raise
-    for path in _base_runner_paths():
-        if not path.is_file():
-            continue
-        spec = importlib.util.spec_from_file_location("x11_shm_direct_vs_spawned_runner", path)
-        if spec is None or spec.loader is None:
-            continue
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-        return module
-    raise RuntimeError("base X11-SHM runner is unavailable")
-
-
-base_runner = _load_base_runner()
+# Keep this a static import so Modal's source automount includes the sibling
+# runner in the function container as well as in local script execution.
+import x11_shm_direct_vs_spawned_runner as base_runner  # noqa: E402
 
 APP_NAME = "mcu-x11-shm-direct-vs-spawned-cpu-ablation"
 OUTER_CPU = 2.0
