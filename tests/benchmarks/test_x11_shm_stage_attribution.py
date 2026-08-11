@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,9 +126,21 @@ def test_cpu_cgroup_path_supports_v1_and_v2() -> None:
     )
 
 
-def test_cpu_cgroup_path_rejects_parent_traversal() -> None:
-    with pytest.raises(RuntimeError, match="invalid"):
-        stage._parse_cpu_cgroup_paths("0::/../../private\n")
+def test_namespaced_parent_cgroup_uses_only_verified_hierarchy_root(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "cpu.max").write_text("100000 100000\n", encoding="utf-8")
+    (tmp_path / "cpu.stat").write_text("usage_usec 0\n", encoding="utf-8")
+    membership = (("v2", "/../../private"),)
+
+    (tmp_path / "cgroup.procs").write_text(f"{os.getpid()}\n", encoding="utf-8")
+    assert stage._select_cpu_cgroup_source(tmp_path, membership) == (
+        stage._CpuCgroupSource("v2", tmp_path, None)
+    )
+
+    (tmp_path / "cgroup.procs").write_text("99999999\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="unavailable"):
+        stage._select_cpu_cgroup_source(tmp_path, membership)
 
 
 def test_v1_cpu_cgroup_normalizes_quota_and_counters(tmp_path: Path) -> None:
