@@ -43,11 +43,42 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _target_runtime_identity,
     _TargetRuntimeIdentityError,
     _validate_bounded_x_server_sample_count,
+    x11_shm_stage_attribution_main,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
+
+
+def test_stage_attribution_output_requires_absolute_new_regular_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "scripts.benchmarks.x11_shm_screenshot_runner.run_x11_shm_stage_attribution_diagnostic",
+        SimpleNamespace(remote=lambda **_kwargs: {"status": "complete"}),
+    )
+    monkeypatch.setattr(
+        "scripts.benchmarks.x11_shm_screenshot_runner._local_provenance",
+        lambda: {"source_sha": "a" * 40},
+    )
+
+    with pytest.raises(SystemExit, match="explicit --output"):
+        x11_shm_stage_attribution_main(output="")
+    with pytest.raises(SystemExit, match="absolute"):
+        x11_shm_stage_attribution_main(output="relative.json")
+
+    target = tmp_path / "result.json"
+    symlink = tmp_path / "result-link.json"
+    symlink.symlink_to(target)
+    with pytest.raises(SystemExit, match="already exists"):
+        x11_shm_stage_attribution_main(output=str(symlink))
+
+    x11_shm_stage_attribution_main(output=str(target))
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert json_module.loads(target.read_text(encoding="utf-8")) == {"status": "complete"}
+    with pytest.raises(SystemExit, match="already exists"):
+        x11_shm_stage_attribution_main(output=str(target))
 
 
 def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:

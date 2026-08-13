@@ -6217,20 +6217,32 @@ def x11_shm_stage_attribution_main(
     warmups: int = STAGE_ATTRIBUTION_WARMUPS,
     output: str = "",
 ) -> None:
-    path = (
-        Path(output)
-        if output
-        else Path("benchmark-data/x11-shm-stage-attribution-1000.json")
-    )
-    if path.exists():
-        raise FileExistsError("stage attribution output already exists")
+    if not output:
+        raise SystemExit("an explicit --output artifact path is required")
+    path = Path(output).expanduser()
+    if not path.is_absolute():
+        raise SystemExit("--output must be an absolute path")
+    if path.exists() or path.is_symlink():
+        raise SystemExit("--output already exists; refusing to overwrite it")
     result = run_x11_shm_stage_attribution_diagnostic.remote(
         captures=captures,
         warmups=warmups,
         provenance=_local_provenance(),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = None
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
+            handle.write(rendered)
+    except (FileExistsError, OSError):
+        raise SystemExit("--output appeared during the run; refusing to overwrite it") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
