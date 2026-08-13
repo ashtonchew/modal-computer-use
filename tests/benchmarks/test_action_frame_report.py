@@ -329,7 +329,7 @@ def test_assembler_accepts_sanitized_runner_artifact_with_unknown_cursor_policy(
 
     assert result["arms"][1]["screenshot"]["show_cursor"] is None
     markdown = render_action_frame_report_markdown(result)
-    assert "cursor=unknown" in markdown
+    assert "cursor setting not reported" in markdown
 
 
 @pytest.mark.parametrize("field", ["source_sha", "cleanup_verification", "provider_artifact"])
@@ -429,9 +429,13 @@ def test_markdown_renderer_is_deterministic_and_mobile_friendly() -> None:
     second = render_action_frame_report_markdown(copy.deepcopy(artifact))
 
     assert first == second
+    assert "through 3 public SDK paths" in first
     assert "| Case | Path | p50 (ms) | p95 (ms) | n | Status |" in first
     assert "| ordered-actions-to-immediate-frame-v1 | modal / computer.step |" in first
     assert "All arms use the same action case and timer boundary" in first
+    assert "Target CPU (physical cores)" in first
+    assert "Measurement source SHA" in first
+    assert "external-provider-action-frame-2026-08-11.json" in first
     assert "winner" not in first.lower()
     assert "Not disclosed" in first
     assert "run_id" not in first

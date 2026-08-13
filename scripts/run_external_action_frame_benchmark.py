@@ -598,6 +598,30 @@ def _safe_provider_metadata(value: Any) -> dict[str, Any]:
 
 
 def _safe_failures(*values: Any) -> list[dict[str, Any]]:
+    allowed_phases = {
+        "cleanup",
+        "measure",
+        "readback",
+        "readiness",
+        "runner",
+        "setup",
+        "unknown",
+        "warmup",
+    }
+    allowed_categories = {
+        "BenchmarkFailure",
+        "DaemonHTTPError",
+        "DaytonaError",
+        "E2BError",
+        "RuntimeError",
+        "TimeoutError",
+        "TzafonError",
+        "ValueError",
+        "benchmark_failure",
+        "compare_command_failed",
+        "invalid_json_output",
+        "unknown",
+    }
     failures: list[dict[str, Any]] = []
     for value in values:
         if not isinstance(value, list):
@@ -606,9 +630,13 @@ def _safe_failures(*values: Any) -> list[dict[str, Any]]:
             if not isinstance(item, Mapping):
                 failures.append({"phase": "unknown", "category": "benchmark_failure"})
                 continue
+            phase = item.get("phase")
+            category = item.get("type") or item.get("category")
             safe: dict[str, Any] = {
-                "phase": item.get("phase", "unknown"),
-                "category": item.get("type") or item.get("category") or "benchmark_failure",
+                "phase": phase if phase in allowed_phases else "unknown",
+                "category": (
+                    category if category in allowed_categories else "benchmark_failure"
+                ),
             }
             if isinstance(item.get("iteration"), int):
                 safe["iteration"] = item["iteration"]

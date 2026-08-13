@@ -3,7 +3,7 @@
 > **Status:** Non-normative research
 > **Research cutoff:** 2026-08-11
 > **Scope:** Public benchmark methodology, result tables, and source repositories from first-party developer-tool and infrastructure vendors.
-> **Authority:** This note informs presentation choices. It does not define the product contract or replace measured evidence.
+> **Authority:** This note informs presentation choices. Product contracts and measured evidence remain authoritative.
 
 ## Decision summary
 
@@ -18,10 +18,10 @@ The local repository already has a useful evidence hierarchy:
 - [`docs/README.md`](../docs/README.md) separates the public Mintlify site from engineering contracts, benchmark evidence, procedures, and release records. Its Benchmark section links the general procedure, dated reports, and archive policy.
 - [`docs/benchmarking.md`](../docs/benchmarking.md) owns preregistration and publication rules. It fixes caller topology, target, placement, resources, image, ingress, HTTP version, input backend, screenshot format, action payload, warmup, connection reuse, and capacity. It requires raw observations, failure and cleanup records, and explicit gates.
 - [`docs/benchmark-results-2026-07-30-warm-paths.md`](../docs/benchmark-results-2026-07-30-warm-paths.md) is the local competitor article. It publishes a p50 and p95 table, states 30 successful samples per cell, defines percentile interpolation and ratios, describes each path, separates timer boundaries, and links tracked JSON artifacts plus a deterministic figure check.
-- [`README.md`](../README.md) is a short public entry point. It shows a p50 chart, links the dated warm report, explains that the 47.10 ms opening value is arithmetic over separate medians, and points readers to the later 100-pair fused step report.
+- [`README.md`](../README.md) is a short public entry point. It shows a p50 chart and links the dated action-to-frame report for the timer boundary, path configuration, and p95 values.
 - [`research/computer-use-landscape.md`](computer-use-landscape.md) classifies providers by role. It names Daytona, Scrapybara, E2B Desktop, Browserbase, and browser frameworks, then points readers to the measured provider report. This keeps product positioning separate from benchmark evidence.
 
-The main remaining presentation opportunity is a stable public landing page that puts comparable cases, evidence status, and the configuration summary in one view. The current article has the data and provenance. The landing page should make those fields hard to miss.
+A stable public landing page should put the measured cases, evidence status, and configuration summary in one view. The current report already contains the data and provenance.
 
 ## First-party precedent
 
@@ -38,7 +38,7 @@ The page says recipe values were measured ahead of time on a known GPU configura
 
 The metrics page defines p50, p95, and p99 for TTFT, inter-token latency, and end-to-end latency. It warns that cold starts skew early windows and that percentiles need enough request volume. The pages show a concise pattern table, a clear distinction between reference and deployment measurements, and a short caveat list.
 
-**Reusable rule:** publish the workload shape and deployment context with the number. Label recipe or synthetic reference data separately from a run against the deployed endpoint. State cost and point-in-time limits.
+For this project, publish the workload shape and deployment context with each result. Label synthetic reference data separately from deployed endpoint measurements. State cost and point-in-time limits.
 
 ### Browserless hosted browser benchmark
 
@@ -50,7 +50,7 @@ The repository makes the harness executable. Its sample configuration sets `TOTA
 
 The article does not publish p50 or p95, a client hardware description, a run date in the result block, or raw result files. Fastest and slowest are a useful tail signal for a ten-run smoke comparison. They are weaker than percentile estimates for a larger campaign.
 
-**Reusable rule:** one provider adapter per row, one shared workload function, one run count, and one version field. Add p50 and p95, client and target topology, run timestamp, and raw JSON or CSV when moving from a smoke comparison to a public claim.
+For this project, use one provider adapter per row and one shared workload. Record the run count, version, p50, p95, caller and target topology, timestamp, and sanitized JSON or CSV.
 
 ### PlanetScale Postgres benchmark
 
@@ -74,7 +74,7 @@ The methodology explains why the product and competitors receive matched or grea
 
 The companion [On benchmarking](https://planetscale.com/blog/on-benchmarking) article gives explicit reporting guidance. It recommends p50, p90, p95, p99, variance or error bars, and full time series. It calls for cache warmup, repeated runs, exact hardware or cloud instance, OS, software versions, build flags, benchmark tool, configuration, and command line. It warns about coordinated omission, noisy neighbors, client bottlenecks, missing hardware, average-only reports, and comparisons across unlike workloads.
 
-**Reusable rule:** put hardware, region, resource matching, storage, workload size, concurrency, duration, and timer metric in a visible table before the result. Explain resource asymmetry and availability topology. Publish a runnable reproduction path and show p99 or p95 with QPS and cost when those dimensions matter.
+For this project, put hardware, region, resource matching, workload size, duration, and timer metric beside the result. Explain resource asymmetry and availability topology. Link a runnable reproduction path. Include tail latency, throughput, and cost when the experiment measures them.
 
 ### ClickHouse ClickBench and Hardware Benchmark
 
@@ -94,7 +94,7 @@ The execution rules are explicit:
 
 The README names important limits: one flat table, one-node bias in many results, sequential queries, few repetitions, and difficult direct comparisons across unlike systems. It advises readers to treat scoreboards cautiously. The Hardware Benchmark adds a separate public table of machines, hot or cold mode, relative time, hardware notes, contributor identity, and warnings about runs with unflushed caches.
 
-**Reusable rule:** version raw artifacts by UTC date, retain history, publish workload and cache rules, measure end to end, keep failed or unsupported cases visible, and state aggregation formulas. Use a separate hardware matrix when machine choice is itself a comparison axis.
+For this project, date evidence artifacts, retain history, publish workload and cache rules, measure end to end, keep failed cases visible, and state aggregation formulas. Use a separate hardware table when the experiment compares machines.
 
 ### Deno serverless cold-start benchmark
 
@@ -104,7 +104,7 @@ Deno compares Deno, Node, and Bun for Express, Fastify, and Hono applications. T
 
 The article adds a second check on a Google Cloud `e2-medium` VM in `us-west1`. It uses the same applications, exits after initialization, and runs `hyperfine --warmup 2`. The published blocks show mean, standard deviation, range, and run count. The article explains that Lambda `Init Duration` excludes code-artifact copy time and client network RTT. It treats that metric as a proxy because images are under 85 MB and initialization dominates the tested workload.
 
-**Reusable rule:** record runtime and framework versions, cloud region, memory or machine type, architecture, forced-cold or warm policy, run count, raw CSV, and the proxy metric's excluded phases. A second environment can test whether a primary metric generalizes.
+For this project, record runtime and framework versions, region, resources, architecture, warm or cold policy, run count, sanitized evidence, and excluded phases. Use a second environment when the experiment tests whether a result generalizes.
 
 ## Cross-source comparison
 
@@ -138,7 +138,7 @@ For every public claim, answer these questions in the landing page or a linked d
 - Which result is eligible, historical, diagnostic, or arithmetic only?
 - Which workload and topology limits prevent generalization?
 
-This format preserves the local repository's current strengths while making competitor comparison easier to audit. It also follows the strongest common pattern across Modal, Browserless, PlanetScale, ClickHouse, and Deno: explicit workload shape, visible configuration, percentile or variance context, reproducible source, and caveats close to the claim.
+Modal, Browserless, PlanetScale, ClickHouse, and Deno all publish the workload, configuration, statistical context, reproducible source, and limits near the result. This project should use the same structure for external provider reports.
 
 ## Primary sources
 

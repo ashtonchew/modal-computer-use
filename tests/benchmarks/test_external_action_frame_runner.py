@@ -257,6 +257,42 @@ def test_build_tracked_payload_keeps_failures_and_excludes_ids() -> None:
     assert "message" not in encoded
 
 
+def test_build_tracked_payload_redacts_untrusted_failure_labels() -> None:
+    runner = _load_runner()
+    compare = {
+        "benchmark": "provider-compare",
+        "ok": False,
+        "providers": {
+            "daytona": {
+                "status": "failed",
+                "metadata": {},
+                "failures": [
+                    {
+                        "phase": "https://example.test/phase?token=secret",
+                        "category": "api-token-secret",
+                    }
+                ],
+                "cases": {},
+            }
+        },
+    }
+
+    payload = runner.build_tracked_payload(
+        compare,
+        source_sha="a" * 40,
+        evidence_date="2026-08-11",
+        cleanup={},
+        iterations=3,
+    )
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert payload["providers"]["daytona"]["failures"] == [
+        {"phase": "unknown", "category": "benchmark_failure"}
+    ]
+    assert "example.test" not in encoded
+    assert "api-token-secret" not in encoded
+
+
 def test_run_command_uses_only_external_action_frame_providers(tmp_path) -> None:
     runner = _load_runner()
     env_file = tmp_path / ".env"

@@ -2,7 +2,7 @@
 
 **Evidence status:** eligible
 
-This report measures one click followed by the next full screenshot through four public SDK paths. The paths use different caller topologies and screenshot formats. Read the values as complete path measurements. A provider ranking needs a separate campaign with matched configurations.
+This report measures one click followed by the next full screenshot through 4 public SDK paths. The paths use different caller topologies, request counts, resources, and screenshot formats. The results describe each complete path under its recorded configuration.
 
 ## Results
 
@@ -26,16 +26,19 @@ Action payload SHA-256: `83599900ae670680c7d84271000b03114940c492d935c26b5f0999a
 
 ## Configuration
 
-| Provider | SDK | SDK retry policy | Caller | Requested region | Observed region | Screenshot | CPU | Memory (MiB) | SDK calls | Transport requests |
+Target CPU and memory describe the desktop target. Modal used the same resource shape for its placed caller and target. The benchmark did not measure the external callers' resources.
+
+| Provider | SDK | SDK retry policy | Caller | Requested region | Observed region | Screenshot | Target CPU (physical cores) | Target memory (MiB) | SDK calls | Transport requests |
 | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |
-| modal-daemon | modal-computer-use 2.0.0 | no-mutation-retry | application-owned-modal-function | us-west-2 | us-west-2 | PNG dimensions unknown cursor=false | 1.0 | 2048 | 1 | 1 |
-| daytona | daytona 0.175.0 | provider-default | external-provider-sdk-caller | provider-default | provider-default | PNG 1024x768 cursor=unknown | 1.0 | 1024 | 2 | 2 |
-| e2b | e2b-desktop 2.4.2 | provider-default | external-provider-sdk-caller | provider-default | provider-default | PNG 1024x768 cursor=unknown | 2.0 | 1024 | 2 | 3 |
-| tzafon | tzafon 2.44.1 | provider-default | external-provider-sdk-caller | provider-default | provider-default | JPEG 1280x720 cursor=unknown | Not disclosed | Not disclosed | 2 | 2 |
+| modal-daemon | modal-computer-use 2.0.0 | no-mutation-retry | application-owned-modal-function | us-west-2 | us-west-2 | PNG; dimensions not recorded; cursor hidden | 1.0 | 2048 | 1 | 1 |
+| daytona | daytona 0.175.0 | provider-default | external-provider-sdk-caller | provider-default | provider-default | PNG; 1024 x 768; cursor setting not reported | 1.0 | 1024 | 2 | 2 |
+| e2b | e2b-desktop 2.4.2 | provider-default | external-provider-sdk-caller | provider-default | provider-default | PNG; 1024 x 768; cursor setting not reported | 2.0 | 1024 | 2 | 3 |
+| tzafon | tzafon 2.44.1 | provider-default | external-provider-sdk-caller | provider-default | provider-default | JPEG; 1280 x 720; cursor setting not reported | Not disclosed | Not disclosed | 2 | 2 |
 
 ## Evidence
 
-Source SHA: `767429c0c4b074cbdb6461767d9090ec3090b3bd`.
+Measurement source SHA: [`767429c0c4b074cbdb6461767d9090ec3090b3bd`](https://github.com/ashtonchew/modal-computer-use/commit/767429c0c4b074cbdb6461767d9090ec3090b3bd).
+Sanitized artifact: [external-provider-action-frame-2026-08-11.json](../benchmark-data/external-provider-action-frame-2026-08-11.json).
 
 Input artifact digests:
 

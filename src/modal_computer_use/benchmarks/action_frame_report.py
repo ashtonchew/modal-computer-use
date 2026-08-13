@@ -118,7 +118,7 @@ def validate_action_frame_report(payload: dict[str, Any]) -> None:
     """Validate a complete, sanitized action-to-frame benchmark artifact.
 
     Validation requires one complete measured arm per provider. Every arm uses the
-    same logical case, timer boundary, screenshot shape, warmup count, and measured
+    same logical case, timer boundary, screenshot policy, warmup count, and measured
     count. Summary values are recalculated from the retained numeric samples.
     """
 
@@ -255,10 +255,10 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
         "",
         "**Evidence status:** eligible",
         "",
-        "This report measures one click followed by the next full screenshot through four "
-        "public SDK paths. The paths use different caller topologies and screenshot formats. "
-        "Read the values as complete path measurements. A provider ranking needs a separate "
-        "campaign with matched configurations.",
+        "This report measures one click followed by the next full screenshot through "
+        f"{len(arms)} public SDK paths. The paths use different caller topologies, request "
+        "counts, resources, and screenshot formats. The results describe each complete path "
+        "under its recorded configuration.",
         "",
         "## Results",
         "",
@@ -291,8 +291,13 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Configuration",
             "",
+            "Target CPU and memory describe the desktop target. Modal used the same resource "
+            "shape for its placed caller and target. The benchmark did not measure the external "
+            "callers' resources.",
+            "",
             "| Provider | SDK | SDK retry policy | Caller | Requested region | Observed region | "
-            "Screenshot | CPU | Memory (MiB) | SDK calls | Transport requests |",
+            "Screenshot | Target CPU (physical cores) | Target memory (MiB) | SDK calls | "
+            "Transport requests |",
             "| --- | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
         ]
     )
@@ -302,23 +307,12 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
         resources = arm["resources"]
         shape = arm["request_shape"]
         screenshot = arm["screenshot"]
-        cursor_policy = screenshot["show_cursor"]
-        cursor_label = (
-            str(cursor_policy).lower() if isinstance(cursor_policy, bool) else "unknown"
-        )
-        dimensions = (
-            f"{screenshot['width']}x{screenshot['height']}"
-            if isinstance(screenshot["width"], int)
-            and isinstance(screenshot["height"], int)
-            else "dimensions unknown"
-        )
         lines.append(
             f"| {arm['provider']} | {sdk['package']} {sdk['version']} | "
             f"{sdk['retry_policy']} | {topology['caller']} | "
             f"{topology['requested_region']} | "
-            f"{topology['observed_region']} | {screenshot['format'].upper()} "
-            f"{dimensions} cursor="
-            f"{cursor_label} | {_format_cpu(resources['cpu'])} | "
+            f"{topology['observed_region']} | {_format_screenshot(screenshot)} | "
+            f"{_format_cpu(resources['cpu'])} | "
             f"{_format_memory(resources['memory_mib'])} | {shape['sdk_calls']} | "
             f"{shape['transport_requests']} |"
         )
@@ -328,7 +322,10 @@ def render_action_frame_report_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Evidence",
             "",
-            f"Source SHA: `{payload['source_sha']}`.",
+            f"Measurement source SHA: [`{payload['source_sha']}`](https://github.com/"
+            f"ashtonchew/modal-computer-use/commit/{payload['source_sha']}).",
+            f"Sanitized artifact: [external-provider-action-frame-{payload['evidence_date']}.json]"
+            f"(../benchmark-data/external-provider-action-frame-{payload['evidence_date']}.json).",
             "",
             "Input artifact digests:",
             "",
@@ -989,6 +986,25 @@ def _format_cpu(value: Any) -> str:
 
 def _format_memory(value: Any) -> str:
     return "Not disclosed" if value is None else str(value)
+
+
+def _format_screenshot(value: dict[str, Any]) -> str:
+    width = value["width"]
+    height = value["height"]
+    dimensions = (
+        f"{width} x {height}"
+        if isinstance(width, int) and isinstance(height, int)
+        else "dimensions not recorded"
+    )
+    cursor = value["show_cursor"]
+    cursor_label = (
+        "cursor shown"
+        if cursor is True
+        else "cursor hidden"
+        if cursor is False
+        else "cursor setting not reported"
+    )
+    return f"{value['format'].upper()}; {dimensions}; {cursor_label}"
 
 
 def _reject_unsafe_values(value: Any, *, key: str | None = None) -> None:
