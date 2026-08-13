@@ -19,6 +19,11 @@ from ..constants import (
 )
 from ..lifecycle import CleanupError
 from ..safety import _safe_url_origin
+from .action_frame import (
+    ACTION_FRAME_CASE_ID,
+    ACTION_FRAME_POINT,
+    ACTION_FRAME_PROVIDER_TOPOLOGY,
+)
 from .live import run_product_provider_cases, wait_for_provider_screenshot_ready
 from .payloads import describe_screenshot_payload, validated_screenshot_size
 from .provider_sdk import (
@@ -78,7 +83,9 @@ _X11_CURSOR_READBACK_SCRIPT = (
 )
 
 
-def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
+def run_tzafon_provider(
+    *, iterations: int, warmup_iterations: int, benchmark_case: str = "all"
+) -> dict[str, Any]:
     provider = "tzafon"
     api_key = os.environ.get("TZAFON_API_KEY")
     if not api_key:
@@ -111,6 +118,7 @@ def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str,
         "ingress_included": False,
         "first_observation_api": "computers.screenshot(base64=True)",
         "target_kind": "product",
+        "topology": dict(ACTION_FRAME_PROVIDER_TOPOLOGY),
         "action_equivalence": {
             "move_click": (
                 "one coordinate click; Tzafon does not expose a standalone pointer-move action"
@@ -139,6 +147,7 @@ def run_tzafon_provider(*, iterations: int, warmup_iterations: int) -> dict[str,
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
+        benchmark_case=benchmark_case,
     )
 
 
@@ -271,6 +280,27 @@ class TzafonDriver:
             "batching": "single_request",
         }
 
+    def action_to_immediate_frame(self, computer: Any) -> dict[str, Any]:
+        result = self._client.computers.click(_computer_id(computer), x=512, y=384)
+        _ensure_action_succeeded(result)
+        actions = {
+            "semantic": "coordinate_click",
+            "benchmark_semantics": "one-left-click-at-512-384-v1",
+            "logical_action_count": 1,
+            "provider_action_count": 1,
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 1,
+            "request_count_source": "harness_direct",
+            "native_batch": False,
+            "batching": "single_request",
+        }
+        screenshot = self.screenshot_full(computer)
+        return {
+            "path": "provider-sdk-action-then-screenshot",
+            "actions": {"case_id": ACTION_FRAME_CASE_ID, **actions},
+            "screenshot": {**screenshot["payload"], "show_cursor": None},
+        }
+
     def type_100_chars(self, computer: Any) -> dict[str, Any]:
         return self._type_text(computer, PROVIDER_BENCHMARK_TEXT)
 
@@ -339,6 +369,21 @@ class TzafonDriver:
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
             ),
+        }
+
+    def verify_action_frame_readback(self, computer: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return provider_stdout(self._exec(computer, command, timeout=timeout))
+
+        return {
+            "cursor_position": verification_step(
+                lambda: verify_provider_cursor_position(
+                    run_command,
+                    query_command=_x11_cursor_readback_command(),
+                    expected=ACTION_FRAME_POINT,
+                ),
+                redacted_text=None,
+            )
         }
 
     def _type_text(self, computer: Any, text: str) -> dict[str, Any]:

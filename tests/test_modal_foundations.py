@@ -148,16 +148,19 @@ def test_image_uv_version_matches_the_packaged_runtime_project() -> None:
     assert runtime_project["tool"]["uv"]["required-version"] == f"=={IMAGE_UV_VERSION}"
 
 
-def test_managed_source_mount_keeps_only_python_and_image_runtime_inputs(
+def test_managed_source_mount_keeps_runtime_inputs_and_package_marker(
     tmp_path: Path,
 ) -> None:
     package = tmp_path / "modal_computer_use"
-    hidden_worktree_package = tmp_path / ".worktrees" / "tail-probe" / "modal_computer_use"
+    hidden_worktree_package = tmp_path / ".worktrees" / "probe" / "modal_computer_use"
 
     assert not _managed_source_mount_ignore(package / "daemon" / "app.py")
     assert not _managed_source_mount_ignore(hidden_worktree_package / "daemon" / "app.py")
     assert not _managed_source_mount_ignore(package / "_image_runtime" / "pyproject.toml")
     assert not _managed_source_mount_ignore(package / "_image_runtime" / "uv.lock")
+    assert not _managed_source_mount_ignore(package / "py.typed")
+    assert _managed_source_mount_ignore(package / ".env")
+    assert _managed_source_mount_ignore(package / "README.txt")
     assert _managed_source_mount_ignore(package / "_native" / "x11_shm" / "Cargo.lock")
     assert _managed_source_mount_ignore(package / "_native" / "x11_shm" / "target" / "lib.so")
     assert _managed_source_mount_ignore(package / "daemon" / "__pycache__" / "app.pyc")

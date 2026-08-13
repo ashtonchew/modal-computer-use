@@ -10,10 +10,19 @@ The provider-neutral dict format every adapter converts into. A typical entry ha
 
 Translator from a provider's action JSON into the action schema. Adapters do not call the provider API; they only normalize. See `docs/anthropic-adapter.md` and `docs/openai-adapter.md`.
 
+## Adapter Benchmark
+
+An in-process measurement of action normalization. It does not create provider resources or call a
+provider API.
+
 ## Application readiness
 
 A caller-defined semantic condition that must hold before a particular next step. The Alpha
 visual-change observation feature does not infer it.
+
+## Benchmark Surface
+
+The SDK, daemon, Modal, or adapter path that a benchmark measures.
 
 ## Artifact, artifact root
 
@@ -41,6 +50,11 @@ application readiness or visual stability.
 ## Daemon
 
 `computer-use-daemon`. The HTTP server that runs inside the sandbox on port `8080` and owns the desktop. The SDK is a thin client over its routes.
+
+## External Provider Benchmark
+
+A credential-gated measurement that calls third-party SDKs or creates provider resources. Tracked
+results contain sanitized, revision-bound evidence.
 
 ## First visual change
 

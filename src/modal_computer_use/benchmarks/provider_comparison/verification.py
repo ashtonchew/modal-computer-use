@@ -16,8 +16,12 @@ TYPE_READBACK_FOCUS_X = 40
 TYPE_READBACK_FOCUS_Y = 60
 
 
-def verify_daytona_cursor_position(sandbox: Any) -> dict[str, Any]:
-    expected = _expected_sequence_cursor_position()
+def verify_daytona_cursor_position(
+    sandbox: Any,
+    *,
+    expected: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    expected = expected or _expected_sequence_cursor_position()
     observed = _provider_point_xy(
         call_first_available(provider_computer_use(sandbox).mouse, ("get_position", "position"))
     )
@@ -34,8 +38,9 @@ def verify_provider_cursor_position(
     run_command: Callable[[str, int], str],
     *,
     query_command: str = "xdotool getmouselocation --shell",
+    expected: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
-    expected = _expected_sequence_cursor_position()
+    expected = expected or _expected_sequence_cursor_position()
     output = run_command(query_command, 10)
     observed = _parse_xdotool_position(output)
     ok = observed == expected

@@ -12,6 +12,7 @@ from ..lifecycle import (
 )
 from ..measurement import _case_result, _measure_observed_case
 from ..safety import _failure, _redact_text
+from .action_frame import ACTION_FRAME_CASE, run_action_to_immediate_frame_case
 from .provider_sdk import sanitize_provider_observation
 from .results import build_provider_cleanup_case, build_provider_result
 from .verification import TYPE_READBACK_TEXT
@@ -34,12 +35,14 @@ def run_product_provider_cases(
     iterations: int,
     warmup_iterations: int,
     metadata: dict[str, Any],
+    benchmark_case: str = "all",
 ) -> dict[str, Any]:
     cleanup_errors: list[CleanupError] = []
     results: dict[str, Any] = {}
     measured_runtime_seconds = 0.0
     verification: dict[str, Any] | None = None
-    for case in cold_cases:
+    measure_cold_cases = benchmark_case == "all"
+    for case in cold_cases if measure_cold_cases else ():
         result_name = _provider_cold_case_name(case)
         lifecycle = measure_create_to_first_observation(
             name=result_name,
@@ -68,7 +71,9 @@ def run_product_provider_cases(
                 "deprecated": True,
                 "removal_version": "1.2.0",
             }
-    if warm_cases:
+    action_frame_case = benchmark_case in {ACTION_FRAME_CASE, "action-to-immediate-frame"}
+    selected_warm_cases = warm_cases if benchmark_case == "all" else ()
+    if selected_warm_cases or action_frame_case:
         sandbox: Any | None = None
         warm_start = time.perf_counter()
         try:
@@ -78,7 +83,7 @@ def run_product_provider_cases(
             if sandbox is not None:
                 cleanup_errors.extend(cleanup_lifecycle_resource(driver.cleanup_session, sandbox))
             measured_runtime_seconds += time.perf_counter() - warm_start
-            for case in warm_cases:
+            for case in selected_warm_cases:
                 failure = _failure(
                     case,
                     phase="setup",
@@ -87,6 +92,24 @@ def run_product_provider_cases(
                     redacted_text=_provider_case_redacted_text(case),
                 )
                 results[case] = _case_result(case, iterations, [], [failure])
+            if action_frame_case:
+                failure = _failure(
+                    ACTION_FRAME_CASE,
+                    phase="setup",
+                    iteration=0,
+                    exc=exc,
+                    redacted_text=PROVIDER_BENCHMARK_TEXT,
+                )
+                action_result = _case_result(ACTION_FRAME_CASE, iterations, [], [failure])
+                action_result.update(
+                    {
+                        "case_id": "ordered-actions-to-immediate-frame-v1",
+                        "harness_retries": 0,
+                        "replacement_samples": 0,
+                        "cleanup": {"status": "unverifiable", "survivors": None},
+                    }
+                )
+                results[ACTION_FRAME_CASE] = action_result
         else:
             try:
                 resource_metadata = getattr(driver, "resource_metadata", None)
@@ -94,7 +117,17 @@ def run_product_provider_cases(
                     metadata = _merge_provider_resource_metadata(
                         metadata, resource_metadata(sandbox)
                     )
-                for case in warm_cases:
+                if action_frame_case:
+                    result = run_action_to_immediate_frame_case(
+                        provider=provider,
+                        driver=driver,
+                        resource=sandbox,
+                        iterations=iterations,
+                        warmup_iterations=warmup_iterations,
+                    )
+                    _promote_accounting_metadata(result)
+                    results[ACTION_FRAME_CASE] = result
+                for case in selected_warm_cases:
                     operation = getattr(driver, case)
                     case_failures: list[dict[str, Any]] = []
                     samples, observations = _measure_observed_case(
@@ -112,7 +145,10 @@ def run_product_provider_cases(
                     _promote_accounting_metadata(result)
                     results[case] = result
             finally:
-                verifier = getattr(driver, "verify_readbacks", None)
+                verifier_name = (
+                    "verify_action_frame_readback" if action_frame_case else "verify_readbacks"
+                )
+                verifier = getattr(driver, verifier_name, None)
                 if callable(verifier):
                     try:
                         verification = sanitize_provider_observation(verifier(sandbox))
@@ -123,6 +159,27 @@ def run_product_provider_cases(
                         }
                 warm_errors = cleanup_lifecycle_resource(driver.cleanup_session, sandbox)
                 cleanup_errors.extend(warm_errors)
+                if action_frame_case:
+                    action_result = results.get(ACTION_FRAME_CASE)
+                    if isinstance(action_result, dict):
+                        cleanup = {
+                            "status": "clean" if not warm_errors else "failed",
+                            "survivors": 0 if not warm_errors else None,
+                        }
+                        verified_cleanup = _verify_provider_cleanup(driver, sandbox)
+                        if verified_cleanup["status"] != "unverifiable":
+                            cleanup = verified_cleanup
+                        action_result["cleanup"] = cleanup
+                        if warm_errors or cleanup["status"] == "leaked":
+                            action_result["status"] = "failed"
+                            action_result.setdefault("failures", []).append(
+                                {
+                                    "case": ACTION_FRAME_CASE,
+                                    "phase": "cleanup",
+                                    "category": "cleanup_unverified",
+                                    "iteration": 0,
+                                }
+                            )
                 measured_runtime_seconds += time.perf_counter() - warm_start
     cleanup_case = build_provider_cleanup_case(cleanup_errors)
     if cleanup_case is not None:
@@ -137,6 +194,26 @@ def run_product_provider_cases(
         runtime_seconds=measured_runtime_seconds,
         verification=verification,
     )
+
+
+def _verify_provider_cleanup(driver: Any, resource: Any) -> dict[str, Any]:
+    verifier = getattr(driver, "verify_cleanup", None)
+    if not callable(verifier):
+        return {"status": "unverifiable", "survivors": None}
+    try:
+        value = verifier(resource)
+    except Exception:
+        return {"status": "unverifiable", "survivors": None}
+    if not isinstance(value, dict):
+        return {"status": "unverifiable", "survivors": None}
+    status = value.get("status")
+    survivors = value.get("survivors")
+    if status == "clean" and survivors == 0:
+        return {"status": "clean", "survivors": 0}
+    return {
+        "status": "unverifiable" if status not in {"clean", "leaked"} else status,
+        "survivors": survivors if isinstance(survivors, int) and survivors >= 0 else None,
+    }
 
 
 def wait_for_provider_screenshot_ready(

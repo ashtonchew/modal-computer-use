@@ -64,6 +64,15 @@ See the [Computer Step report](../docs/benchmark-results-2026-08-08-computer-ste
 action-to-immediate-frame boundary and promotion result. These files do not replace or rewrite the
 historical article evidence.
 
+The current External Provider Benchmark uses one sanitized report artifact:
+
+- [`external-provider-action-frame-2026-08-11.json`](external-provider-action-frame-2026-08-11.json).
+
+It binds 100 samples from each complete action-to-frame path to the same action payload, timer
+boundary, source revision, and input artifact digests. The
+[dated report](../docs/benchmark-results-2026-08-11-provider-action-frame.md) records the different
+caller topologies, screenshot formats, request counts, and provider resource disclosures.
+
 The weighted input-capacity promotion uses three independent same-runtime runs:
 
 - [`input-capacity-run-1-2026-08-08.json`](input-capacity-run-1-2026-08-08.json);

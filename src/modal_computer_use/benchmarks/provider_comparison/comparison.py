@@ -68,6 +68,8 @@ def run_provider_comparison(
     environment_metadata: dict[str, Any] | None = None,
     precomputed_provider_results: dict[str, dict[str, Any]] | None = None,
     modal_action_pacing_seconds: float | None = None,
+    benchmark_case: str = "all",
+    modal_action_frame_runner: Any = None,
 ) -> dict[str, Any]:
     if iterations < 1:
         raise ValueError("iterations must be >= 1")
@@ -91,6 +93,8 @@ def run_provider_comparison(
                     sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                     environment_metadata=environment_metadata,
                     modal_action_pacing_seconds=modal_action_pacing_seconds,
+                    benchmark_case=benchmark_case,
+                    modal_action_frame_runner=modal_action_frame_runner,
                 )
             except Exception as exc:
                 result = build_provider_result(
@@ -123,6 +127,7 @@ def run_provider_comparison(
         "base_url": _safe_base_url(base_url),
         "iterations": iterations,
         "warmup_iterations": warmup_iterations,
+        "benchmark_case": benchmark_case,
         "metadata": {
             "environment": {
                 key: value
@@ -148,6 +153,8 @@ def run_provider(
     sandbox_exec_setup_failure: dict[str, Any] | None,
     environment_metadata: dict[str, Any] | None,
     modal_action_pacing_seconds: float | None = None,
+    benchmark_case: str = "all",
+    modal_action_frame_runner: Any = None,
 ) -> dict[str, Any]:
     if provider == "modal-daemon":
         return _run_modal_daemon_provider(
@@ -158,6 +165,8 @@ def run_provider(
             warmup_iterations=warmup_iterations,
             environment_metadata=environment_metadata,
             action_pacing_seconds=modal_action_pacing_seconds,
+            benchmark_case=benchmark_case,
+            action_frame_runner=modal_action_frame_runner,
         )
     if provider == "modal-exec":
         surface_payload = run_sdk_surface_benchmark(
@@ -182,21 +191,33 @@ def run_provider(
                 provider,
                 "live Daytona benchmarks are disabled in mock-local mode",
             )
-        return run_daytona_provider(iterations=iterations, warmup_iterations=warmup_iterations)
+        return run_daytona_provider(
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            benchmark_case=benchmark_case,
+        )
     if provider == "e2b":
         if mode == "mock-local":
             return provider_not_measured(
                 provider,
                 "live E2B benchmarks are disabled in mock-local mode",
             )
-        return run_e2b_provider(iterations=iterations, warmup_iterations=warmup_iterations)
+        return run_e2b_provider(
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            benchmark_case=benchmark_case,
+        )
     if provider == "tzafon":
         if mode == "mock-local":
             return provider_not_measured(
                 provider,
                 "live Tzafon benchmarks are disabled in mock-local mode",
             )
-        return run_tzafon_provider(iterations=iterations, warmup_iterations=warmup_iterations)
+        return run_tzafon_provider(
+            iterations=iterations,
+            warmup_iterations=warmup_iterations,
+            benchmark_case=benchmark_case,
+        )
     return provider_not_measured(str(provider), "unknown provider")
 
 
@@ -228,11 +249,26 @@ def _run_modal_daemon_provider(
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
     action_pacing_seconds: float | None,
+    benchmark_case: str,
+    action_frame_runner: Any,
 ) -> dict[str, Any]:
     if client is None:
         return provider_not_measured(
             "modal-daemon",
             "modal-daemon comparison requires --mock-local or --base-url",
+        )
+    if benchmark_case in {"action_to_immediate_frame", "action-to-immediate-frame"}:
+        if callable(action_frame_runner):
+            return action_frame_runner(
+                client=client,
+                iterations=iterations,
+                warmup_iterations=warmup_iterations,
+                environment_metadata=environment_metadata,
+            )
+        return provider_not_measured(
+            "modal-daemon",
+            "canonical action-to-frame comparison requires an application-owned placed "
+            "Modal Function and one borrowed session; direct daemon comparison is excluded",
         )
     pace = (
         (lambda: time.sleep(action_pacing_seconds))

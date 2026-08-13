@@ -380,7 +380,7 @@ def _image_runtime_context() -> Path:
 
 
 def _managed_source_mount_ignore(path: Path) -> bool:
-    """Keep Python sources and the two files needed by remote Image hydration."""
+    """Keep runtime source files and exclude generated or private files."""
     parts = path.parts
     try:
         package_index = len(parts) - 1 - parts[::-1].index("modal_computer_use")
@@ -392,7 +392,7 @@ def _managed_source_mount_ignore(path: Path) -> bool:
         return True
     if path.name.endswith(".pyc") or any(part.startswith(".") for part in relative_parts):
         return True
-    if path.is_dir() or path.suffix == ".py":
+    if path.is_dir() or path.suffix == ".py" or path.name == "py.typed":
         return False
     return relative_parts[-2:] not in {
         ("_image_runtime", "pyproject.toml"),
