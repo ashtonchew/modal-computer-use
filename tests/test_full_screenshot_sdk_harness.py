@@ -37,14 +37,48 @@ from scripts.benchmarks.x11_shm_screenshot_runner import (
     _run_x11_shm_daemon_local_tail_diagnostic,
     _run_x11_shm_scheduling_diagnostic,
     _run_x11_shm_soak,
+    _run_x11_shm_stage_attribution_diagnostic,
     _run_x11_shm_transport_threshold_diagnostic,
     _select_daemon_worker_pair,
+    _target_runtime_identity,
+    _TargetRuntimeIdentityError,
     _validate_bounded_x_server_sample_count,
+    x11_shm_stage_attribution_main,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = b"png-body-for-contract-test"
 SHA = hashlib.sha256(DATA).hexdigest()
+
+
+def test_stage_attribution_output_requires_absolute_new_regular_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "scripts.benchmarks.x11_shm_screenshot_runner.run_x11_shm_stage_attribution_diagnostic",
+        SimpleNamespace(remote=lambda **_kwargs: {"status": "complete"}),
+    )
+    monkeypatch.setattr(
+        "scripts.benchmarks.x11_shm_screenshot_runner._local_provenance",
+        lambda: {"source_sha": "a" * 40},
+    )
+
+    with pytest.raises(SystemExit, match="explicit --output"):
+        x11_shm_stage_attribution_main(output="")
+    with pytest.raises(SystemExit, match="absolute"):
+        x11_shm_stage_attribution_main(output="relative.json")
+
+    target = tmp_path / "result.json"
+    symlink = tmp_path / "result-link.json"
+    symlink.symlink_to(target)
+    with pytest.raises(SystemExit, match="already exists"):
+        x11_shm_stage_attribution_main(output=str(symlink))
+
+    x11_shm_stage_attribution_main(output=str(target))
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert json_module.loads(target.read_text(encoding="utf-8")) == {"status": "complete"}
+    with pytest.raises(SystemExit, match="already exists"):
+        x11_shm_stage_attribution_main(output=str(target))
 
 
 def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
@@ -147,6 +181,8 @@ def test_scheduling_diagnostic_script_compiles_with_safe_fixed_probes() -> None:
     assert 'directory / "cpu.max"' in script
     assert 'cpu_limit["quota_usec"] != cpu_limit["period_usec"]' in script
     assert "client_sched_before = schedstat(os.getpid())" in script
+    assert 'raise RuntimeError("required schedstat unavailable")' not in script
+    assert 'raise RuntimeError("x11-shm worker schedstat unavailable")' not in script
     assert '"correlations"' in script
     assert '"body"' not in script
     assert '"headers"' not in script
@@ -360,6 +396,9 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
         "runqueue_wait_ns": 110,
         "timeslices": 8,
     }
+    assert artifact["daemon_schedstat_available"] is True
+    assert artifact["worker_schedstat_available"] is True
+    assert artifact["client_schedstat_available"] is True
     assert artifact["correlations"]["body_read_ms"][
         "cgroup_throttled_usec_delta"
     ] == {"coefficient": 0.25, "sample_count": 1_000}
@@ -377,6 +416,38 @@ def test_scheduling_diagnostic_builder_retains_only_safe_causal_evidence() -> No
     assert keys(artifact).isdisjoint(
         {"body", "headers", "raw", "data", "authorization", "token"}
     )
+
+    without_schedstat = json_module.loads(json_module.dumps(observation))
+    for owner in ("daemon", "worker", "client"):
+        without_schedstat[f"{owner}_schedstat_before"] = None
+        without_schedstat[f"{owner}_schedstat_after"] = None
+    schedstat_optional = _build_x11_shm_scheduling_diagnostic(
+        without_schedstat, cleanup, provenance
+    )
+
+    assert schedstat_optional["passed"] is True
+    assert schedstat_optional["daemon_schedstat_available"] is False
+    assert schedstat_optional["worker_schedstat_available"] is False
+    assert schedstat_optional["client_schedstat_available"] is False
+    assert schedstat_optional["daemon_schedstat_delta"] is None
+    assert schedstat_optional["worker_schedstat_delta"] is None
+    assert schedstat_optional["client_schedstat_delta"] is None
+    assert schedstat_optional["cgroup_cpu_stat_deltas"] == {
+        "usage_usec": 4_000,
+        "nr_periods": 4,
+        "nr_throttled": 1,
+        "throttled_usec": 200,
+    }
+
+    changing_schedstat = json_module.loads(json_module.dumps(observation))
+    changing_schedstat["worker_schedstat_before"] = None
+    changing_schedstat_rejected = _build_x11_shm_scheduling_diagnostic(
+        changing_schedstat, cleanup, provenance
+    )
+
+    assert changing_schedstat_rejected["passed"] is False
+    assert changing_schedstat_rejected["failure_type"] == "EvidenceValidationError"
+    assert changing_schedstat_rejected["failure_phase"] == "artifact_validation"
 
     unsafe = json_module.loads(json_module.dumps(observation))
     unsafe["correlations"]["body_read_ms"]["cgroup_usage_usec_delta"][
@@ -537,6 +608,175 @@ def test_scheduling_diagnostic_has_safe_remote_and_local_entrypoints() -> None:
     assert "def run_x11_shm_scheduling_diagnostic(" in runner
     assert "def x11_shm_scheduling_diagnostic_main(" in runner
     assert "run_x11_shm_scheduling_diagnostic.remote(" in runner
+
+
+def test_stage_attribution_runs_one_private_same_sandbox_child() -> None:
+    child_payload = {
+        "passed": False,
+        "warmups_completed": 20,
+        "captures_completed": 17,
+        "full_captures": 9,
+        "region_captures": 8,
+        "failure_type": "RuntimeError",
+        "failure_phase": "stage_capture",
+    }
+    target_identity = {
+        "backend": "x11-shm",
+        "codec": "png-deflate-level1-no-filter",
+        "module_sha256": "a" * 64,
+        "image_object_id": "im-test",
+        "cpu": 1.0,
+        "quota_usec": 100_000,
+        "period_usec": 100_000,
+        "memory_bytes": 2048 * 1024**2,
+        "machine": "x86_64",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(child_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:3] == (
+                "python",
+                "-m",
+                "modal_computer_use.benchmarks.x11_shm_stage_attribution",
+            )
+            assert args[3:] == ("--captures", "1000", "--warmups", "20")
+            assert kwargs == {"timeout": 900}
+            return FakeProcess()
+
+    class FakeContext:
+        exited = False
+
+        async def __aenter__(self) -> SimpleNamespace:
+            return SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+        async def __aexit__(self, *args: object) -> None:
+            self.exited = True
+
+    context = FakeContext()
+    context.target_identity = target_identity
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: context)
+    )
+
+    assert result == {**child_payload, "target_identity": target_identity}
+    assert context.exited is True
+
+
+def test_stage_attribution_has_non_gating_remote_and_local_entrypoints() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def run_x11_shm_stage_attribution_diagnostic(" in runner
+    assert "def x11_shm_stage_attribution_main(" in runner
+    assert "run_x11_shm_stage_attribution_diagnostic.remote(" in runner
+    assert 'lambda: _ArmContext("mss")' in runner
+
+
+def test_stage_attribution_retains_safe_context_entry_subphase() -> None:
+    class FailedContext:
+        enter_phase = "runtime_identity"
+
+        async def __aenter__(self) -> None:
+            raise RuntimeError("private target detail")
+
+        async def __aexit__(self, *args: object) -> None:
+            raise AssertionError("context exit must not run after failed entry")
+
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: FailedContext())
+    )
+
+    assert result["passed"] is False
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "context_enter.runtime_identity"
+
+
+def test_stage_attribution_retains_safe_runtime_identity_failure_stage() -> None:
+    class FailedContext:
+        enter_phase = "runtime_identity"
+
+        async def __aenter__(self) -> None:
+            raise _TargetRuntimeIdentityError("native_import")
+
+        async def __aexit__(self, *args: object) -> None:
+            raise AssertionError("context exit must not run after failed entry")
+
+    result = asyncio.run(
+        _run_x11_shm_stage_attribution_diagnostic(lambda: FailedContext())
+    )
+
+    assert result["passed"] is False
+    assert result["failure_type"] == "RuntimeError"
+    assert result["failure_phase"] == "context_enter.runtime_identity.native_import"
+
+
+def test_target_runtime_identity_maps_remote_failure_to_safe_stage() -> None:
+    remote_payload = {
+        "ok": False,
+        "failure_phase": "image_object_id",
+        "failure_type": "RuntimeError",
+    }
+
+    class FakeRead:
+        async def aio(self) -> str:
+            return json_module.dumps(remote_payload)
+
+    class FakeWait:
+        async def aio(self) -> int:
+            return 0
+
+    class FakeProcess:
+        stdout = SimpleNamespace(read=FakeRead())
+        wait = FakeWait()
+
+    class FakeExec:
+        async def aio(self, *args: object, **kwargs: object) -> FakeProcess:
+            assert args[:2] == ("python", "-c")
+            script = str(args[2])
+            assert script.index('phase = "backend_marker"') < script.index(
+                '"backend": backend'
+            )
+            assert script.index('phase = "codec_marker"') < script.index(
+                '"codec": codec'
+            )
+            assert kwargs == {"timeout": 30}
+            return FakeProcess()
+
+    computer = SimpleNamespace(_sandbox=SimpleNamespace(exec=FakeExec()))
+
+    with pytest.raises(_TargetRuntimeIdentityError) as raised:
+        asyncio.run(_target_runtime_identity(computer))
+
+    assert raised.value.safe_phase == "image_object_id"
+
+
+def test_target_runtime_identity_reports_missing_sandbox_handle() -> None:
+    with pytest.raises(_TargetRuntimeIdentityError) as raised:
+        asyncio.run(_target_runtime_identity(SimpleNamespace()))
+
+    assert raised.value.safe_phase == "sandbox_handle"
+
+
+def test_x11_benchmark_bakes_daemon_source_for_nested_sandbox() -> None:
+    runner = Path("scripts/benchmarks/x11_shm_screenshot_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from modal_computer_use.image import _named_image_recipe" in runner
+    assert '_named_image_recipe(variant="chromium", window_manager="xfce")' in runner
     assert 'lambda: _ArmContext("x11-shm")' in runner
     assert 'Path("benchmark-data/x11-shm-scheduling-diagnostic-1000.json")' in runner
     assert "provenance=_local_provenance()" in runner

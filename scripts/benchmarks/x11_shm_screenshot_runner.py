@@ -42,6 +42,15 @@ from modal_computer_use.benchmarks.x11_shm_screenshot import (
     evaluate_x11_shm_screenshot_promotion,
     validate_x11_shm_screenshot_artifact,
 )
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    CAPTURES as STAGE_ATTRIBUTION_CAPTURES,
+)
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    WARMUPS as STAGE_ATTRIBUTION_WARMUPS,
+)
+from modal_computer_use.benchmarks.x11_shm_stage_attribution import (
+    build_artifact as build_stage_attribution_artifact,
+)
 from modal_computer_use.config import (
     ActionConfig,
     BrowserConfig,
@@ -50,7 +59,7 @@ from modal_computer_use.config import (
     RuntimeConfig,
 )
 from modal_computer_use.errors import DaemonHTTPError
-from modal_computer_use.image import default_image
+from modal_computer_use.image import _named_image_recipe
 from modal_computer_use.latency import SessionStartupTiming
 
 _RUNNER_PATH = Path(__file__).resolve()
@@ -79,6 +88,37 @@ CLOUD = "aws"
 WIDTH = 1024
 HEIGHT = 768
 DEPTH = 24
+
+_TARGET_RUNTIME_IDENTITY_PHASES = frozenset(
+    {
+        "exec_launch",
+        "process_wait",
+        "process_exit",
+        "stdout_read",
+        "empty_output",
+        "json_decode",
+        "envelope",
+        "sandbox_handle",
+        "native_import",
+        "cpu_limit",
+        "memory_limit",
+        "module_hash",
+        "image_object_id",
+        "backend_marker",
+        "codec_marker",
+        "module_sha256",
+    }
+)
+
+
+class _TargetRuntimeIdentityError(RuntimeError):
+    """Carry one bounded preflight phase without retaining target error text."""
+
+    def __init__(self, safe_phase: str) -> None:
+        if safe_phase not in _TARGET_RUNTIME_IDENTITY_PHASES:
+            safe_phase = "envelope"
+        self.safe_phase = safe_phase
+        super().__init__("target runtime identity preflight failed")
 CPU = 1.0
 MEMORY_MIB = 2048
 BROWSER_LAUNCH_ARGS = (
@@ -300,12 +340,7 @@ app = modal.App(APP_NAME)
 # creation. Benchmark scripts are the final runtime mount, so no build step
 # follows a local startup mount.
 image = (
-    default_image(
-        profile="browser",
-        browser="chromium",
-        window_manager="xfce",
-        browser_prewarm=True,
-    )
+    _named_image_recipe(variant="chromium", window_manager="xfce")
     .add_local_dir(
         str(PROJECT_ROOT / "scripts"),
         remote_path="/opt/mcu-scripts",
@@ -417,7 +452,7 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
 
     sandbox = getattr(computer, "_sandbox", None)
     if sandbox is None or not hasattr(sandbox, "exec"):
-        raise RuntimeError("sandbox handle unavailable for target identity")
+        raise _TargetRuntimeIdentityError("sandbox_handle")
     script = dedent(
         """
         import hashlib
@@ -425,8 +460,6 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
         import os
         import platform
         from pathlib import Path
-
-        import _modal_computer_use_x11_shm as native
 
         def read_text(path):
             return Path(path).read_text(encoding="utf-8").strip()
@@ -437,49 +470,133 @@ async def _target_runtime_identity(computer: Any) -> dict[str, Any]:
                     return read_text(path)
             raise RuntimeError(f"target cgroup limit is unavailable: {paths}")
 
-        cpu_max = Path("/sys/fs/cgroup/cpu.max")
-        if cpu_max.is_file():
-            cpu_quota, cpu_period = read_text(cpu_max).split()
+        def first_cpu_limit(directories):
+            for directory in directories:
+                base = Path(directory)
+                quota_path = base / "cpu.cfs_quota_us"
+                period_path = base / "cpu.cfs_period_us"
+                if quota_path.is_file() and period_path.is_file():
+                    return read_text(quota_path), read_text(period_path)
+            raise RuntimeError(f"target CPU limit is unavailable: {directories}")
+
+        phase = "native_import"
+        try:
+            import _modal_computer_use_x11_shm as native
+
+            phase = "cpu_limit"
+            cpu_max = Path("/sys/fs/cgroup/cpu.max")
+            if cpu_max.is_file():
+                cpu_quota, cpu_period = read_text(cpu_max).split()
+            else:
+                cpu_quota, cpu_period = first_cpu_limit((
+                    "/sys/fs/cgroup/cpu",
+                    "/sys/fs/cgroup/cpu,cpuacct",
+                ))
+            if cpu_quota in {"max", "-1"}:
+                raise RuntimeError("target CPU quota is unbounded")
+            quota_usec = int(cpu_quota)
+            period_usec = int(cpu_period)
+            if quota_usec < 1 or quota_usec != period_usec:
+                raise RuntimeError("target CPU quota is not exactly one CPU")
+            cpu = quota_usec / period_usec
+
+            phase = "memory_limit"
+            memory_limit = first_text((
+                "/sys/fs/cgroup/memory.max",
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            ))
+            if memory_limit in {"max", "-1"}:
+                raise RuntimeError("target memory limit is unbounded")
+            memory_bytes = int(memory_limit)
+
+            phase = "module_hash"
+            module_bytes = Path(native.__file__).read_bytes()
+            module_sha256 = hashlib.sha256(module_bytes).hexdigest()
+
+            phase = "image_object_id"
+            image_object_id = os.environ.get("MODAL_IMAGE_ID")
+            if not isinstance(image_object_id, str) or not image_object_id.startswith("im-"):
+                raise RuntimeError("target image identity is unavailable")
+
+            phase = "backend_marker"
+            backend = native.backend
+            phase = "codec_marker"
+            codec = native.codec
+            identity = {
+                "backend": backend,
+                "codec": codec,
+                "module_sha256": module_sha256,
+                "image_object_id": image_object_id,
+                "cpu": cpu,
+                "quota_usec": quota_usec,
+                "period_usec": period_usec,
+                "memory_bytes": memory_bytes,
+                "machine": platform.machine(),
+            }
+        except Exception as exc:
+            print(json.dumps({
+                "ok": False,
+                "failure_phase": phase,
+                "failure_type": type(exc).__name__,
+            }, sort_keys=True))
         else:
-            cpu_quota = first_text((
-                "/sys/fs/cgroup/cpu/cpu.cfs_quota_us",
-                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us",
-            ))
-            cpu_period = first_text((
-                "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
-                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us",
-            ))
-        if cpu_quota in {"max", "-1"}:
-            raise RuntimeError("target CPU quota is unbounded")
-        memory_limit = first_text((
-            "/sys/fs/cgroup/memory.max",
-            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-        ))
-        if memory_limit in {"max", "-1"}:
-            raise RuntimeError("target memory limit is unbounded")
-        module_bytes = Path(native.__file__).read_bytes()
-        print(json.dumps({
-            "backend": native.backend,
-            "codec": native.codec,
-            "module_sha256": hashlib.sha256(module_bytes).hexdigest(),
-            "image_object_id": os.environ.get("MODAL_IMAGE_ID"),
-            "cpu": int(cpu_quota) / int(cpu_period),
-            "memory_bytes": int(memory_limit),
-            "machine": platform.machine(),
-        }, sort_keys=True))
+            print(json.dumps({"ok": True, "identity": identity}, sort_keys=True))
         """
     )
-    process = await sandbox.exec.aio("python", "-c", script, timeout=30)
-    raw = await _completed_process_stdout_text(process)
-    payload = json.loads(raw)
+    try:
+        process = await sandbox.exec.aio("python", "-c", script, timeout=30)
+    except Exception:
+        raise _TargetRuntimeIdentityError("exec_launch") from None
+    try:
+        exit_code = await process.wait.aio()
+    except Exception:
+        raise _TargetRuntimeIdentityError("process_wait") from None
+    try:
+        raw = await _process_stdout_text(process)
+    except Exception:
+        raise _TargetRuntimeIdentityError("stdout_read") from None
+    if exit_code != 0:
+        raise _TargetRuntimeIdentityError("process_exit")
+    if not raw:
+        raise _TargetRuntimeIdentityError("empty_output")
+    try:
+        envelope = json.loads(raw)
+    except (TypeError, ValueError):
+        raise _TargetRuntimeIdentityError("json_decode") from None
+    if not isinstance(envelope, dict):
+        raise _TargetRuntimeIdentityError("envelope")
+    if envelope.get("ok") is False:
+        phase = envelope.get("failure_phase")
+        if not isinstance(phase, str):
+            phase = "envelope"
+        raise _TargetRuntimeIdentityError(phase)
+    payload = envelope.get("identity")
+    if envelope.get("ok") is not True or not isinstance(payload, dict):
+        raise _TargetRuntimeIdentityError("envelope")
+    if payload.get("backend") != "x11-shm":
+        raise _TargetRuntimeIdentityError("backend_marker")
+    if payload.get("codec") != "png-deflate-level1-no-filter":
+        raise _TargetRuntimeIdentityError("codec_marker")
+    module_sha256 = payload.get("module_sha256")
     if (
-        not isinstance(payload, dict)
-        or payload.get("backend") != "x11-shm"
-        or payload.get("codec") != "png-deflate-level1-no-filter"
-        or not isinstance(payload.get("module_sha256"), str)
-        or not str(payload.get("image_object_id", "")).startswith("im-")
+        not isinstance(module_sha256, str)
+        or len(module_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in module_sha256)
     ):
-        raise RuntimeError("target native build identity is invalid")
+        raise _TargetRuntimeIdentityError("module_sha256")
+    if not str(payload.get("image_object_id", "")).startswith("im-"):
+        raise _TargetRuntimeIdentityError("image_object_id")
+    quota_usec = payload.get("quota_usec")
+    period_usec = payload.get("period_usec")
+    if (
+        isinstance(quota_usec, bool)
+        or not isinstance(quota_usec, int)
+        or isinstance(period_usec, bool)
+        or not isinstance(period_usec, int)
+        or quota_usec < 1
+        or quota_usec != period_usec
+    ):
+        raise _TargetRuntimeIdentityError("cpu_limit")
     return payload
 
 
@@ -2652,6 +2769,24 @@ def _build_x11_shm_scheduling_diagnostic(
     daemon_schedstat_delta: dict[str, int] | None = None
     worker_schedstat_delta: dict[str, int] | None = None
     client_schedstat_delta: dict[str, int] | None = None
+
+    def optional_schedstat_delta(prefix: str) -> dict[str, int] | None:
+        raw_before = observation.get(f"{prefix}_schedstat_before")
+        raw_after = observation.get(f"{prefix}_schedstat_after")
+        if raw_before is None and raw_after is None:
+            return None
+        if raw_before is None or raw_after is None:
+            raise ValueError("scheduling diagnostic schedstat availability changed")
+        before = _retain_scheduling_counter_snapshot(
+            raw_before,
+            X11_SCHEDULING_SCHEDSTAT_FIELDS,
+        )
+        after = _retain_scheduling_counter_snapshot(
+            raw_after,
+            X11_SCHEDULING_SCHEDSTAT_FIELDS,
+        )
+        return _scheduling_counter_delta(before, after)
+
     if observation.get("passed") is True:
         try:
             summaries = _retain_scheduling_summaries(observation.get("summaries"))
@@ -2711,41 +2846,11 @@ def _build_x11_shm_scheduling_diagnostic(
             )
             if any(per_request_sums[key] > cgroup_delta[key] for key in cgroup_delta):
                 raise ValueError("scheduling diagnostic sampled cgroup delta is invalid")
-            daemon_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("daemon_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            daemon_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("daemon_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            daemon_schedstat_delta = _scheduling_counter_delta(
-                daemon_schedstat_before, daemon_schedstat_after
-            )
+            daemon_schedstat_delta = optional_schedstat_delta("daemon")
             if worker_before is None or worker_after is None:
                 raise ValueError("scheduling diagnostic worker identity is unavailable")
-            worker_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("worker_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            worker_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("worker_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            worker_schedstat_delta = _scheduling_counter_delta(
-                worker_schedstat_before, worker_schedstat_after
-            )
-            client_schedstat_before = _retain_scheduling_counter_snapshot(
-                observation.get("client_schedstat_before"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            client_schedstat_after = _retain_scheduling_counter_snapshot(
-                observation.get("client_schedstat_after"),
-                X11_SCHEDULING_SCHEDSTAT_FIELDS,
-            )
-            client_schedstat_delta = _scheduling_counter_delta(
-                client_schedstat_before, client_schedstat_after
-            )
+            worker_schedstat_delta = optional_schedstat_delta("worker")
+            client_schedstat_delta = optional_schedstat_delta("client")
         except (TypeError, ValueError, OverflowError):
             validation_failed = True
             summaries = None
@@ -2958,9 +3063,6 @@ def _build_x11_shm_scheduling_diagnostic(
         and correlations is not None
         and cpu_max is not None
         and cgroup_delta is not None
-        and daemon_schedstat_delta is not None
-        and worker_schedstat_delta is not None
-        and client_schedstat_delta is not None
         and retained_provenance is not None
     )
     if observation.get("passed") is True and not contract_matches:
@@ -3028,7 +3130,9 @@ def _build_x11_shm_scheduling_diagnostic(
         "worker_identity_before": worker_before,
         "worker_identity_after": worker_after,
         "worker_identity_same": worker_same,
+        "daemon_schedstat_available": daemon_schedstat_delta is not None,
         "worker_schedstat_available": worker_schedstat_delta is not None,
+        "client_schedstat_available": client_schedstat_delta is not None,
         "cpu_max": cpu_max,
         "cgroup_cpu_stat_before": cgroup_before,
         "cgroup_cpu_stat_after": cgroup_after,
@@ -3999,11 +4103,7 @@ def _build_x11_shm_scheduling_diagnostic_script(
                 raise RuntimeError("daemon/worker process identity pair unavailable")
             daemon_sched_before = schedstat(daemon_before["pid"])
             client_sched_before = schedstat(os.getpid())
-            if daemon_sched_before is None or client_sched_before is None:
-                raise RuntimeError("required schedstat unavailable")
             worker_sched_before = schedstat(worker_before["pid"])
-            if worker_sched_before is None:
-                raise RuntimeError("x11-shm worker schedstat unavailable")
             failure_phase = "cgroup_before"
             cgroup_before = cpu_stat(directory)
             if cgroup_before is None or cpu_limit is None:
@@ -4038,13 +4138,19 @@ def _build_x11_shm_scheduling_diagnostic_script(
             ) = process_identity_pair()
             if daemon_after is None or worker_after is None:
                 raise RuntimeError("terminal daemon/worker identity pair unavailable")
-            daemon_sched_after = schedstat(daemon_after["pid"])
-            client_sched_after = schedstat(os.getpid())
-            if daemon_sched_after is None or client_sched_after is None:
-                raise RuntimeError("terminal required schedstat unavailable")
-            worker_sched_after = schedstat(worker_after["pid"])
-            if worker_sched_after is None:
-                raise RuntimeError("terminal x11-shm worker schedstat unavailable")
+            daemon_sched_after = (
+                schedstat(daemon_after["pid"])
+                if daemon_sched_before is not None
+                else None
+            )
+            client_sched_after = (
+                schedstat(os.getpid()) if client_sched_before is not None else None
+            )
+            worker_sched_after = (
+                schedstat(worker_after["pid"])
+                if worker_sched_before is not None
+                else None
+            )
             if (
                 daemon_after["pid"] != daemon_before["pid"]
                 or daemon_after["starttime_ticks"] != daemon_before["starttime_ticks"]
@@ -4194,6 +4300,11 @@ async def _run_x11_shm_scheduling_diagnostic(
             raise RuntimeError("scheduling diagnostic returned invalid output")
         observation = payload
     except Exception as exc:
+        failure_phase = phase
+        if phase == "context_enter":
+            enter_phase = getattr(context, "enter_phase", None)
+            if isinstance(enter_phase, str) and enter_phase:
+                failure_phase = f"context_enter.{enter_phase}"
         observation = {
             "passed": False,
             "requested_source": "x11-shm",
@@ -4205,7 +4316,7 @@ async def _run_x11_shm_scheduling_diagnostic(
             "full_captures": 0,
             "region_captures": 0,
             "failure_type": type(exc).__name__,
-            "failure_phase": phase,
+            "failure_phase": failure_phase,
         }
     finally:
         if computer is not None:
@@ -4233,6 +4344,91 @@ async def _run_x11_shm_scheduling_diagnostic(
         "warmups_requested": warmups,
         "warmups_completed": 0,
         "captures_requested": captures,
+        "captures_completed": 0,
+        "full_captures": 0,
+        "region_captures": 0,
+        "failure_type": "NoResult",
+        "failure_phase": phase,
+    }
+
+
+async def _run_x11_shm_stage_attribution_diagnostic(
+    factory: Callable[[], AbstractAsyncContextManager[Any]],
+    *,
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+) -> dict[str, Any]:
+    if captures != STAGE_ATTRIBUTION_CAPTURES or warmups != STAGE_ATTRIBUTION_WARMUPS:
+        raise ValueError("stage attribution diagnostic workload is fixed")
+    context = factory()
+    computer: Any | None = None
+    phase = "context_enter"
+    observation: dict[str, Any] | None = None
+    try:
+        computer = await context.__aenter__()
+        phase = "sandbox_handle"
+        sandbox = getattr(computer, "_sandbox", None)
+        if sandbox is None or not hasattr(sandbox, "exec"):
+            raise RuntimeError("sandbox handle unavailable for stage attribution")
+        phase = "private_stage_child"
+        process = await sandbox.exec.aio(
+            "python",
+            "-m",
+            "modal_computer_use.benchmarks.x11_shm_stage_attribution",
+            "--captures",
+            str(captures),
+            "--warmups",
+            str(warmups),
+            timeout=900,
+        )
+        exit_code = await process.wait.aio()
+        raw = await _process_stdout_text(process)
+        if exit_code != 0 or not raw:
+            raise RuntimeError("stage attribution child failed")
+        phase = "parse_child_output"
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("stage attribution child returned invalid output")
+        payload["target_identity"] = getattr(context, "target_identity", None)
+        observation = payload
+    except Exception as exc:
+        failure_phase = phase
+        if phase == "context_enter":
+            enter_phase = getattr(context, "enter_phase", None)
+            if isinstance(enter_phase, str) and enter_phase:
+                failure_phase = f"context_enter.{enter_phase}"
+            if isinstance(exc, _TargetRuntimeIdentityError):
+                failure_phase = f"{failure_phase}.{exc.safe_phase}"
+        observation = {
+            "passed": False,
+            "warmups_completed": 0,
+            "captures_completed": 0,
+            "full_captures": 0,
+            "region_captures": 0,
+            "failure_type": (
+                "RuntimeError"
+                if isinstance(exc, _TargetRuntimeIdentityError)
+                else type(exc).__name__
+            ),
+            "failure_phase": failure_phase,
+        }
+    finally:
+        if computer is not None:
+            try:
+                await context.__aexit__(None, None, None)
+            except Exception as exc:
+                if observation is None:
+                    observation = {}
+                observation.update(
+                    {
+                        "passed": False,
+                        "failure_type": type(exc).__name__,
+                        "failure_phase": "context_cleanup",
+                    }
+                )
+    return observation or {
+        "passed": False,
+        "warmups_completed": 0,
         "captures_completed": 0,
         "full_captures": 0,
         "region_captures": 0,
@@ -5820,6 +6016,49 @@ def run_x11_shm_scheduling_diagnostic(
     return asyncio.run(execute())
 
 
+@app.function(
+    image=image,
+    cpu=1,
+    memory=MEMORY_MIB,
+    timeout=1_200,
+    region=REGION,
+    retries=0,
+)
+def run_x11_shm_stage_attribution_diagnostic(
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+    provenance: dict[str, str | bool] | None = None,
+) -> dict[str, Any]:
+    """Run one same-Sandbox private source-stage diagnostic."""
+
+    if captures != STAGE_ATTRIBUTION_CAPTURES or warmups != STAGE_ATTRIBUTION_WARMUPS:
+        raise ValueError("stage attribution diagnostic workload is fixed")
+    if provenance is None:
+        raise ValueError("clean local benchmark provenance is required")
+
+    async def execute() -> dict[str, Any]:
+        try:
+            observation = await _run_x11_shm_stage_attribution_diagnostic(
+                lambda: _ArmContext("mss"),
+                captures=captures,
+                warmups=warmups,
+            )
+        except BaseException as exc:
+            observation = {
+                "passed": False,
+                "warmups_completed": 0,
+                "captures_completed": 0,
+                "full_captures": 0,
+                "region_captures": 0,
+                "failure_type": type(exc).__name__,
+                "failure_phase": "diagnostic",
+            }
+        cleanup = await _final_sandbox_cleanup()
+        return build_stage_attribution_artifact(observation, cleanup, provenance)
+
+    return asyncio.run(execute())
+
+
 @app.local_entrypoint()
 def main(
     samples: int = 100,
@@ -5969,6 +6208,41 @@ def x11_shm_scheduling_diagnostic_main(
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+@app.local_entrypoint()
+def x11_shm_stage_attribution_main(
+    captures: int = STAGE_ATTRIBUTION_CAPTURES,
+    warmups: int = STAGE_ATTRIBUTION_WARMUPS,
+    output: str = "",
+) -> None:
+    if not output:
+        raise SystemExit("an explicit --output artifact path is required")
+    path = Path(output).expanduser()
+    if not path.is_absolute():
+        raise SystemExit("--output must be an absolute path")
+    if path.exists() or path.is_symlink():
+        raise SystemExit("--output already exists; refusing to overwrite it")
+    result = run_x11_shm_stage_attribution_diagnostic.remote(
+        captures=captures,
+        warmups=warmups,
+        provenance=_local_provenance(),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = None
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
+            handle.write(rendered)
+    except (FileExistsError, OSError):
+        raise SystemExit("--output appeared during the run; refusing to overwrite it") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     print(json.dumps(result, indent=2, sort_keys=True))
 
 
