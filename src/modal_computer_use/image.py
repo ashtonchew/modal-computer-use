@@ -379,6 +379,27 @@ def _image_runtime_context() -> Path:
     return context
 
 
+def _managed_source_mount_ignore(path: Path) -> bool:
+    """Keep runtime source files and exclude generated or private files."""
+    parts = path.parts
+    try:
+        package_index = len(parts) - 1 - parts[::-1].index("modal_computer_use")
+    except ValueError:
+        relative_parts = parts
+    else:
+        relative_parts = parts[package_index + 1 :]
+    if "__pycache__" in relative_parts or "target" in relative_parts:
+        return True
+    if path.name.endswith(".pyc") or any(part.startswith(".") for part in relative_parts):
+        return True
+    if path.is_dir() or path.suffix == ".py" or path.name == "py.typed":
+        return False
+    return relative_parts[-2:] not in {
+        ("_image_runtime", "pyproject.toml"),
+        ("_image_runtime", "uv.lock"),
+    }
+
+
 def _native_screenshot_source() -> Path:
     """Return the packaged Cargo source without depending on the caller's CWD."""
     return Path(__file__).resolve().parent / "_native" / "x11_shm"
@@ -430,19 +451,19 @@ def _add_x11_shared_memory_capture(
         f"chmod 0755 /tmp/rustup-init && /tmp/rustup-init -y --profile minimal "
         f"--default-toolchain {_RUST_TOOLCHAIN}",
         "export PATH=/root/.cargo/bin:$PATH && "
-        f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=/usr/local/bin/python3 "
+        f"RUSTUP_TOOLCHAIN={_RUST_TOOLCHAIN} PYO3_PYTHON=python "
         "cargo build "
         f"--locked --release --features {feature_args} "
         f"--manifest-path {cargo_manifest}",
-        "/usr/local/bin/python3 -c 'import pathlib, shutil, sysconfig; "
+        "python -c 'import pathlib, shutil, sysconfig; "
         f"source = pathlib.Path(\"{cargo_output}\"); assert source.is_file(); "
         f"destination = pathlib.Path(sysconfig.get_path(\"platlib\")) / "
         f"\"{_X11_SHARED_MEMORY_EXTENSION}.so\"; "
         "shutil.copy2(source, destination); destination.chmod(0o755)'",
-        f"/usr/local/bin/python3 {_X11_SHARED_MEMORY_REMOTE_PATH}/canary.py",
+        f"python {_X11_SHARED_MEMORY_REMOTE_PATH}/canary.py",
         f"rm -rf {_X11_SHARED_MEMORY_REMOTE_PATH}/target /root/.cargo/registry "
         "/root/.cargo/git /root/.rustup /root/.cargo/bin /tmp/rustup-init",
-        f"/usr/local/bin/python3 -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
+        f"python -c 'import {_X11_SHARED_MEMORY_EXTENSION} as m; "
         "assert hasattr(m, \"X11SharedMemoryScreenshotSession\"); "
         "assert issubclass(m.X11ScreenshotTimeoutError, RuntimeError)'",
     )
@@ -1007,6 +1028,7 @@ def _image_recipe(definition: _ImageRecipeDefinition) -> object:
     return image.add_local_python_source(
         "modal_computer_use",
         copy=definition.copy_source,
+        ignore=_managed_source_mount_ignore,
     )
 
 

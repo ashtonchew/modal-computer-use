@@ -12,6 +12,7 @@ import pytest
 
 from modal_computer_use.image import (
     _add_x11_shared_memory_capture,
+    _managed_source_mount_ignore,
     _named_image_recipe,
     _native_screenshot_source,
     default_image,
@@ -67,8 +68,14 @@ class _FakeImage:
         self.calls.append(("run_commands", commands))
         return self
 
-    def add_local_python_source(self, package: str, *, copy: bool = False) -> _FakeImage:
-        self.calls.append(("add_local_python_source", (package, copy)))
+    def add_local_python_source(
+        self,
+        package: str,
+        *,
+        copy: bool = False,
+        ignore: object,
+    ) -> _FakeImage:
+        self.calls.append(("add_local_python_source", (package, copy, ignore)))
         return self
 
 
@@ -110,6 +117,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     image = default_image(profile=profile, browser=browser)
 
     assert isinstance(image, _FakeImage)
+    call_names = [name for name, _ in image.calls]
+    assert call_names.index("uv_sync") < call_names.index("run_commands")
     source_call = next(value for name, value in image.calls if name == "add_local_dir")
     local_path, remote_path, copy, ignore = source_call
     assert Path(local_path) == _native_screenshot_source()
@@ -124,6 +133,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "rustup" in joined
     assert "1.91.0" in joined
     assert "cargo build --locked --release --features extension-module" in joined
+    assert "PYO3_PYTHON=python" in joined
+    assert "/usr/local/bin/python3" not in joined
     assert "rustup target add" not in joined
     assert "/target/release/lib_modal_computer_use_x11_shm.so" in joined
     assert "_modal_computer_use_x11_shm.so" in joined
@@ -131,7 +142,8 @@ def test_all_managed_inline_recipes_build_x11_shared_memory_extension(
     assert "import _modal_computer_use_x11_shm" in joined
     assert "/opt/modal-computer-use/native/x11_shm/canary.py" in joined
     assert any(
-        name == "add_local_python_source" and value == ("modal_computer_use", False)
+        name == "add_local_python_source"
+        and value == ("modal_computer_use", False, _managed_source_mount_ignore)
         for name, value in image.calls
     )
 
@@ -181,8 +193,11 @@ def test_all_named_image_variants_use_the_same_native_recipe(
 
     assert [name for name, _ in calls].count("add_local_dir") == 1
     assert [name for name, _ in calls].count("run_commands") == 1
-    assert any(name == "add_local_python_source" and value == ("modal_computer_use", True)
-               for name, value in calls)
+    assert any(
+        name == "add_local_python_source"
+        and value == ("modal_computer_use", True, _managed_source_mount_ignore)
+        for name, value in calls
+    )
 
 
 def test_root_artifacts_keep_universal_wheel_and_bundle_locked_native_source(
