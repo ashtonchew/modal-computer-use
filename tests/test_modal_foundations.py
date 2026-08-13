@@ -14,6 +14,7 @@ from modal_computer_use.config import ComputerConfig, ImageConfig, NetworkConfig
 from modal_computer_use.image import (
     DESKTOP_APT_PACKAGES,
     IMAGE_UV_VERSION,
+    _managed_source_mount_ignore,
     _named_image_recipe,
     _published_named_image_identities,
     default_image,
@@ -86,8 +87,14 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
             self.calls.append(("env", environment))
             return self
 
-        def add_local_python_source(self, package: str, *, copy: bool = False) -> FakeImage:
-            self.calls.append(("add_local_python_source", (package, copy)))
+        def add_local_python_source(
+            self,
+            package: str,
+            *,
+            copy: bool = False,
+            ignore: object,
+        ) -> FakeImage:
+            self.calls.append(("add_local_python_source", (package, copy, ignore)))
             return self
 
     monkeypatch.setattr(
@@ -121,7 +128,10 @@ def test_default_browser_image_installs_browsers_and_enables_prewarm(monkeypatch
         "env",
         "add_local_python_source",
     ]
-    assert image.calls[-1] == ("add_local_python_source", ("modal_computer_use", False))
+    assert image.calls[-1] == (
+        "add_local_python_source",
+        ("modal_computer_use", False, _managed_source_mount_ignore),
+    )
 
 
 def test_image_uv_version_matches_the_packaged_runtime_project() -> None:
@@ -136,6 +146,24 @@ def test_image_uv_version_matches_the_packaged_runtime_project() -> None:
     )
 
     assert runtime_project["tool"]["uv"]["required-version"] == f"=={IMAGE_UV_VERSION}"
+
+
+def test_managed_source_mount_keeps_runtime_inputs_and_package_marker(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "modal_computer_use"
+    hidden_worktree_package = tmp_path / ".worktrees" / "probe" / "modal_computer_use"
+
+    assert not _managed_source_mount_ignore(package / "daemon" / "app.py")
+    assert not _managed_source_mount_ignore(hidden_worktree_package / "daemon" / "app.py")
+    assert not _managed_source_mount_ignore(package / "_image_runtime" / "pyproject.toml")
+    assert not _managed_source_mount_ignore(package / "_image_runtime" / "uv.lock")
+    assert not _managed_source_mount_ignore(package / "py.typed")
+    assert _managed_source_mount_ignore(package / ".env")
+    assert _managed_source_mount_ignore(package / "README.txt")
+    assert _managed_source_mount_ignore(package / "_native" / "x11_shm" / "Cargo.lock")
+    assert _managed_source_mount_ignore(package / "_native" / "x11_shm" / "target" / "lib.so")
+    assert _managed_source_mount_ignore(package / "daemon" / "__pycache__" / "app.pyc")
 
 
 def test_default_image_validates_uv_context_before_loading_modal(
@@ -473,8 +501,14 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
             calls.append(("env", values))
             return self
 
-        def add_local_python_source(self, module: str, *, copy: bool) -> FakeRecipe:
-            calls.append(("add_local_python_source", (module, copy)))
+        def add_local_python_source(
+            self,
+            module: str,
+            *,
+            copy: bool,
+            ignore: object,
+        ) -> FakeRecipe:
+            calls.append(("add_local_python_source", (module, copy, ignore)))
             return self
 
     recipe = FakeRecipe()
@@ -502,7 +536,10 @@ def test_named_image_recipe_bakes_daemon_source(monkeypatch) -> None:
         "env",
         "add_local_python_source",
     ]
-    assert ("add_local_python_source", ("modal_computer_use", True)) in calls
+    assert (
+        "add_local_python_source",
+        ("modal_computer_use", True, _managed_source_mount_ignore),
+    ) in calls
 
 
 def test_standard_inline_and_managed_recipes_share_runtime_layers(
@@ -556,8 +593,10 @@ def test_standard_inline_and_managed_recipes_share_runtime_layers(
             module: str,
             *,
             copy: bool,
+            ignore: object,
         ) -> FakeRecipe:
             assert module == "modal_computer_use"
+            assert ignore is _managed_source_mount_ignore
             self.copy_source = copy
             return self
 
