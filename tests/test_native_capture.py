@@ -12,7 +12,7 @@ from PIL import Image
 from modal_computer_use.daemon.desktop import screenshot_capture
 from modal_computer_use.daemon.desktop import screenshots as screenshots_module
 from modal_computer_use.daemon.desktop.screenshots import X11ScreenshotController
-from modal_computer_use.models import Point, ScreenshotOptions
+from modal_computer_use.models import Point, Region, ScreenshotOptions
 
 
 def setup_function() -> None:
@@ -916,6 +916,55 @@ def test_native_readiness_gets_hidden_full_png_and_preserves_cursor_probe(monkey
     assert captured == [(0, 0, 10, 10)]
     assert commands and commands[0][0] == "maim"
     assert "-u" not in commands[0]
+    controller.close()
+
+
+def test_public_capture_paths_never_call_private_timing_diagnostic(monkeypatch) -> None:
+    captured: list[tuple[int, int, int, int]] = []
+
+    class FakeSession:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        def capture_png(self, *args: int) -> bytes:
+            captured.append(tuple(args))
+            return _png_bytes((args[2], args[3]))
+
+        def capture_png_with_timing(self, *_args: int) -> tuple[bytes, object]:
+            raise AssertionError("public capture must not use the timing diagnostic")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        screenshot_capture,
+        "_load_module",
+        lambda: SimpleNamespace(X11SharedMemoryScreenshotSession=FakeSession),
+    )
+    controller = X11ScreenshotController(
+        run=lambda *_args, **_kwargs: pytest.fail("native PNG capture should stay in memory"),
+        width=10,
+        height=10,
+        display=":99",
+        cursor_position=lambda: _cursor_position(),
+        capture_source="x11-shm",
+    )
+    options = ScreenshotOptions(format="png", show_cursor=False)
+
+    full = asyncio.run(controller.capture_bytes(options, prefer_native_png=True))
+    region = asyncio.run(
+        controller.capture_bytes(
+            options,
+            region=Region(x=2, y=3, width=4, height=5),
+            prefer_native_png=True,
+        )
+    )
+    semantic = asyncio.run(controller.capture(options))
+
+    assert full.capture_backend == "x11-shm"
+    assert (region.width, region.height) == (4, 5)
+    assert semantic.size_bytes > 0
+    assert captured == [(0, 0, 10, 10), (2, 3, 4, 5), (0, 0, 10, 10)]
     controller.close()
 
 

@@ -14,7 +14,7 @@ memory, or other resources. The CPU component doubles. Memory and other
 resource charges stay the same, so the total Sandbox cost increases by about
 75% for the tested 2-GiB configuration.
 
-Two important interpretations travel with that number:
+The calculation depends on two billing rules:
 
 1. Modal's `cpu` value is in physical cores; one physical core is two vCPUs.
    This ablation compares 2 vCPUs with 4 vCPUs.
@@ -109,9 +109,10 @@ Sources: [Modal pricing](https://modal.com/pricing) and [Modal billing](https://
 
 ## Deployment guidance
 
-For latency-sensitive sessions that use X11-SHM, prefer 2 physical CPUs when
-the additional active-Sandbox cost is acceptable. Keep MSS as the default for
-cost-sensitive or long-lived sessions.
+MSS remains the default screenshot backend. Teams evaluating X11-SHM for a
+latency-sensitive workload can include a 2-CPU target in their own capacity
+test. The results below describe fixed-topology diagnostics and do not set a
+general CPU recommendation.
 
 The counterbalanced diagnostic ran the CPU profiles in both orders. The 1-CPU
 profiles completed 3,208 captures. They had 13 successful calls of at least
@@ -126,12 +127,12 @@ had 19 calls of at least 500 ms across 4,561 completed captures, a rate of
 earlier diagnostic used a different source revision and protocol. Its counts
 remain separate from the counterbalanced result.
 
-The evidence supports a lower observed tail and timeout risk with 2 CPUs.
+The 2-CPU profiles had fewer observed tails and timeouts in these diagnostics.
 Effective cgroup and scheduler run-queue evidence was unavailable, so the cause
-remains unresolved. Possible causes include CPU quota, host
-scheduling, X11 waiting, and process or executor scheduling. Two CPUs are an
-operational mitigation. The SDK has no two-CPU requirement, and the native
-deadline and fallback remain necessary.
+remains unresolved. Possible causes include CPU quota, host scheduling, X11
+waiting, and process or executor scheduling. The measurements do not establish
+a reliability guarantee or an SDK CPU requirement. The native deadline and MSS
+fallback remain necessary.
 
 The extra CPU costs `$0.023652` for a 10-minute Sandbox or `$0.141912` per hour
 at the base rate. The published explicit-region multiplier raises the hourly
@@ -139,21 +140,23 @@ increment to `$0.212868` to `$0.248346`. A continuously active 30-day Sandbox
 adds `$102.176640` at the base rate, before region multipliers and credits.
 
 Keep the 750 ms native deadline and automatic MSS fallback for both CPU
-configurations. Use a measured service-level target and active Sandbox lifetime
-to decide whether the lower observed risk is worth the added cost.
+configurations. Compare the observed tail rate with the workload's service-level
+target, then account for active Sandbox lifetime before selecting resources.
 
 ## Evidence provenance
 
 The sanitized JSON artifacts remain local. This table records their identities.
-The SHA-256 digest covers the complete artifact file.
+The SHA-256 digest covers the complete artifact file. The permanent
+[`benchmark-source/x11-shm-cpu-ablation-2026-08-11`](https://github.com/ashtonchew/modal-computer-use/tree/benchmark-source/x11-shm-cpu-ablation-2026-08-11)
+tag preserves both source revisions.
 
 | Diagnostic | Source revision | Execution order | Status | Artifact SHA-256 |
 | --- | --- | --- | --- | --- |
-| Counterbalanced forward | `0b131011deca53a6a5c619a1ecdaa9127cf363c9` | 1 CPU, then 2 CPUs | exploratory | `c39ddf0143499de426b5faf1034eabdbfc7f68ddf0cf6167666bf2673fc1c7fb` |
-| Counterbalanced reverse | `0b131011deca53a6a5c619a1ecdaa9127cf363c9` | 2 CPUs, then 1 CPU | rejected after the 1-CPU timeout | `87c79712732fc20a36442712e7cc6ab4d9d85f23615c58c7c993de95e15fae93` |
-| Earlier baseline | `9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c` | 1 CPU, then 2 CPUs | exploratory | `63698f14c567c21528b05d3b4a61ba6238c726a66f90993a63452ad835251d0d` |
-| Earlier repeat 2 | `9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c` | 1 CPU, then 2 CPUs | rejected after the 1-CPU timeout | `5fc959254f310e593c6313adb807275607a945d8dbd145c7d72eea39e234b67b` |
-| Earlier repeat 3 | `9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c` | 1 CPU, then 2 CPUs | rejected after the 1-CPU timeout | `73fcd6610cffc56b9f7864caff2a1ed2944413d4b3b7f80510669922da70804f` |
+| Counterbalanced forward | [`0b131011deca53a6a5c619a1ecdaa9127cf363c9`](https://github.com/ashtonchew/modal-computer-use/commit/0b131011deca53a6a5c619a1ecdaa9127cf363c9) | 1 CPU, then 2 CPUs | exploratory | `c39ddf0143499de426b5faf1034eabdbfc7f68ddf0cf6167666bf2673fc1c7fb` |
+| Counterbalanced reverse | [`0b131011deca53a6a5c619a1ecdaa9127cf363c9`](https://github.com/ashtonchew/modal-computer-use/commit/0b131011deca53a6a5c619a1ecdaa9127cf363c9) | 2 CPUs, then 1 CPU | rejected after the 1-CPU timeout | `87c79712732fc20a36442712e7cc6ab4d9d85f23615c58c7c993de95e15fae93` |
+| Earlier baseline | [`9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c`](https://github.com/ashtonchew/modal-computer-use/commit/9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c) | 1 CPU, then 2 CPUs | exploratory | `63698f14c567c21528b05d3b4a61ba6238c726a66f90993a63452ad835251d0d` |
+| Earlier repeat 2 | [`9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c`](https://github.com/ashtonchew/modal-computer-use/commit/9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c) | 1 CPU, then 2 CPUs | rejected after the 1-CPU timeout | `5fc959254f310e593c6313adb807275607a945d8dbd145c7d72eea39e234b67b` |
+| Earlier repeat 3 | [`9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c`](https://github.com/ashtonchew/modal-computer-use/commit/9259a81b6ee7d9b2a436e169f5e33f563bc8ae8c) | 1 CPU, then 2 CPUs | rejected after the 1-CPU timeout | `73fcd6610cffc56b9f7864caff2a1ed2944413d4b3b7f80510669922da70804f` |
 
 The counterbalanced protocol added timeout scheduler evidence and reversed the
 profile order. Its measurements stay separate from the earlier three-run
