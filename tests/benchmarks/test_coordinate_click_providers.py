@@ -70,3 +70,37 @@ def test_e2b_coordinate_cases_use_coordinate_overload_without_harness_move() -> 
     assert sequence["transport_request_count"] == 8
     assert sequence["native_batch"] is False
     assert sequence["batching"] == "sequential_requests"
+
+
+def test_action_frame_drivers_dispatch_the_shared_single_click_before_screenshot() -> None:
+    daytona_mouse = RecordingDaytonaMouse()
+    daytona_sandbox = SimpleNamespace(computer_use=SimpleNamespace(mouse=daytona_mouse))
+    daytona = object.__new__(DaytonaDriver)
+    daytona.screenshot_full = lambda _resource: {  # type: ignore[method-assign]
+        "payload": {
+            "format": "png",
+            "width": 1024,
+            "height": 768,
+            "decoded_size_bytes": 10,
+        }
+    }
+    daytona_result = daytona.action_to_immediate_frame(daytona_sandbox)
+
+    e2b_sandbox = RecordingE2BSandbox()
+    e2b = object.__new__(E2BDriver)
+    e2b.screenshot_full = lambda _resource: {  # type: ignore[method-assign]
+        "payload": {
+            "format": "jpeg",
+            "width": 1280,
+            "height": 720,
+            "decoded_size_bytes": 11,
+        }
+    }
+    e2b_result = e2b.action_to_immediate_frame(e2b_sandbox)
+
+    assert daytona_mouse.clicks == [(512, 384)]
+    assert e2b_sandbox.clicks == [(512, 384)]
+    assert daytona_result["actions"]["logical_action_count"] == 1
+    assert e2b_result["actions"]["logical_action_count"] == 1
+    assert daytona_result["screenshot"]["format"] == "png"
+    assert e2b_result["screenshot"]["format"] == "jpeg"

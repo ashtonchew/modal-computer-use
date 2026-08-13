@@ -17,6 +17,7 @@ from ..constants import (
     coordinate_click_target,
 )
 from ..lifecycle import CleanupError
+from .action_frame import ACTION_FRAME_CASE_ID, ACTION_FRAME_POINT, ACTION_FRAME_PROVIDER_TOPOLOGY
 from .live import (
     cleanup_provider_sandbox,
     run_product_provider_cases,
@@ -42,7 +43,9 @@ from .verification import (
 E2B_BENCHMARK_SESSION_TIMEOUT_SECONDS = 3600
 
 
-def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, Any]:
+def run_e2b_provider(
+    *, iterations: int, warmup_iterations: int, benchmark_case: str = "all"
+) -> dict[str, Any]:
     provider = "e2b"
     api_key = os.environ.get("E2B_API_KEY")
     if not api_key:
@@ -65,6 +68,7 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
         "ingress_included": False,
         "first_observation_api": "Sandbox.screenshot",
         "target_kind": "product",
+        "topology": dict(ACTION_FRAME_PROVIDER_TOPOLOGY),
         "resolution": "1024x768",
         "dpi": 96,
         "display": ":0",
@@ -94,6 +98,7 @@ def run_e2b_provider(*, iterations: int, warmup_iterations: int) -> dict[str, An
         iterations=iterations,
         warmup_iterations=warmup_iterations,
         metadata=metadata,
+        benchmark_case=benchmark_case,
     )
 
 
@@ -155,6 +160,26 @@ class E2BDriver:
                 action["y"],
             )
         return _coordinate_click_sequence_result()
+
+    def action_to_immediate_frame(self, sandbox: Any) -> dict[str, Any]:
+        call_first_available(sandbox, ("left_click", "leftClick"), 512, 384)
+        actions = {
+            "semantic": "coordinate_click",
+            "benchmark_semantics": "one-left-click-at-512-384-v1",
+            "logical_action_count": 1,
+            "provider_action_count": 1,
+            "provider_sdk_call_count": 1,
+            "transport_request_count": 2,
+            "request_count_source": "pinned_sdk_implementation",
+            "native_batch": False,
+            "batching": "single_request",
+        }
+        screenshot = self.screenshot_full(sandbox)
+        return {
+            "path": "provider-sdk-action-then-screenshot",
+            "actions": {"case_id": ACTION_FRAME_CASE_ID, **actions},
+            "screenshot": {**screenshot["payload"], "show_cursor": None},
+        }
 
     def type_100_chars(self, sandbox: Any) -> dict[str, Any]:
         call_first_available(sandbox, ("write", "type"), PROVIDER_BENCHMARK_TEXT)
@@ -235,6 +260,20 @@ class E2BDriver:
                 ),
                 redacted_text=TYPE_READBACK_TEXT,
             ),
+        }
+
+    def verify_action_frame_readback(self, sandbox: Any) -> dict[str, Any]:
+        def run_command(command: str, timeout: int) -> str:
+            return self._run_command(sandbox, command, timeout=timeout)
+
+        return {
+            "cursor_position": verification_step(
+                lambda: verify_provider_cursor_position(
+                    run_command,
+                    expected=ACTION_FRAME_POINT,
+                ),
+                redacted_text=None,
+            )
         }
 
     def _run_command(self, sandbox: Any, command: str, *, timeout: int) -> str:

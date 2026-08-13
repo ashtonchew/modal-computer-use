@@ -136,15 +136,11 @@ placement, capacity, and measurement guidance.
 
 [![Warm-operation p50 latency on July 30, 2026; lower is better.](https://raw.githubusercontent.com/ashtonchew/modal-computer-use/main/docs/assets/warm-operation-p50-2026-07-30.svg)](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-07-30-warm-paths.md)
 
-The figure shows July 2026 p50 latency for six computer-use cases, based on 30 successful samples
-per cell. Lower is better. Warm-operation latency starts after the desktop and client connection
-are ready. The article's opening 47.10 ms figure is arithmetic over separate 37.25 ms raw-screenshot
-and 9.85 ms click medians. It is not a measured fused turn and is not a latency promise for
-`computer.step()`.
-
-A separate preregistered same-topology benchmark measured the fused `computer.step()` path at
-44.29 ms p50 and 52.57 ms p95 across 100 paired samples. The prior two-request path measured
-47.14 ms and 58.22 ms. See the [Computer Step promotion report](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-08-08-computer-step.md).
+The figure shows July 2026 p50 latency for six warm operations, based on 30 successful samples per
+cell. Lower is better. A separate 100-sample benchmark measured one click followed by the next full
+screenshot. `computer.step()` measured 43.13 ms p50 and 46.35 ms p95. See the
+[action-to-frame report](https://github.com/ashtonchew/modal-computer-use/blob/main/docs/benchmark-results-2026-08-11-provider-action-frame.md)
+for the provider paths, timer boundary, screenshot formats, and configuration limits.
 
 The [benchmark results](https://modal-computer-use.mintlify.app/benchmarks/current-results) give p95
 values and explain how each path was configured and measured.

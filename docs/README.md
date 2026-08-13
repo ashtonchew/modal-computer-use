@@ -54,6 +54,8 @@ procedures, and concise pointers for public guides.
   valid frame.
 - [Computer Step promotion results, 2026-08-08](benchmark-results-2026-08-08-computer-step.md):
   100-pair same-topology evidence for the fused `computer.step()` default.
+- [Action-to-frame path results, 2026-08-11](benchmark-results-2026-08-11-provider-action-frame.md):
+  100-sample complete path measurements for `computer.step()`, Daytona, E2B, and Tzafon.
 - [Weighted input-capacity results, 2026-08-08](benchmark-results-2026-08-08-input-capacity.md):
   three passing same-runtime gates for the 100-token refill and 400-token burst.
 - [Archived benchmark evidence](archive/README.md#archived-benchmarks): superseded, rejected,
