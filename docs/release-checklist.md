@@ -172,15 +172,20 @@ Run live tests only from a trusted developer machine or protected environment wi
 credentials. The protected v1 run is:
 
 ```bash
-MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
+MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
   uv run pytest -m modal tests/test_modal_integration.py -q
 ```
 
 To run only the noVNC smoke:
 
 ```bash
-MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 uv run pytest -m modal tests/test_modal_integration.py -q
+MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 \
+  uv run pytest -m modal tests/test_modal_integration.py -q
 ```
+
+The repository-wide pytest run intentionally skips every `@pytest.mark.modal` item unless
+`MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1` is set. This extra opt-in remains required even when Modal
+credentials are present, so ordinary local validation cannot create billable resources.
 
 The GitHub Actions workflow exposes the same run through `workflow_dispatch` with
 `run_modal_smoke=true`. The protected `modal-smoke` environment must provide `MODAL_TOKEN_ID` and

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -143,6 +145,35 @@ def test_supervisor_reaps_a_process_after_kill_before_returning(tmp_path) -> Non
 
     assert process.killed is True
     assert process.wait_calls == 2
+
+
+def test_supervisor_stop_does_not_block_event_loop_on_slow_wait(tmp_path) -> None:
+    class SlowProcess(_RecordingProcess):
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            time.sleep(0.08)
+            self.stopped = True
+            return 0
+
+    supervisor = Supervisor(
+        DaemonSettings(
+            backend="x11",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+            vnc_mode="off",
+        )
+    )
+    supervisor.running = True
+    supervisor.processes["xvfb"] = SlowProcess([], "xvfb")  # type: ignore[assignment]
+
+    async def exercise() -> None:
+        timer = asyncio.create_task(asyncio.sleep(0.01))
+        await supervisor.stop()
+        assert timer.done(), "slow process wait blocked the event loop"
+
+    asyncio.run(exercise())
 
 
 def test_supervisor_stop_attempts_all_processes_and_preserves_first_error(tmp_path) -> None:

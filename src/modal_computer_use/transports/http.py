@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -163,10 +165,18 @@ class HTTPTransport:
             if error_code:
                 span.set_attribute("error.code", error_code)
             self._raise_for_status(response)
-            with output.open("wb") as handle:
-                for chunk in response.iter_bytes():
-                    if chunk:
-                        handle.write(chunk)
+            temporary = _create_download_temp(output)
+            try:
+                with temporary.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        if chunk:
+                            handle.write(chunk)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, output)
+            except BaseException:
+                _remove_download_temp(temporary)
+                raise
         return output
 
     def _request_headers(self, headers: Mapping[str, str] | None) -> dict[str, str]:
@@ -196,6 +206,25 @@ class HTTPTransport:
                 else None,
                 retry_after_seconds=_retry_after_seconds(response),
             )
+
+
+def _create_download_temp(output: Path) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    os.close(descriptor)
+    return Path(name)
+
+
+def _remove_download_temp(path: Path) -> None:
+    with suppress(FileNotFoundError):
+        path.unlink()
+
+
+def _fsync_download_temp(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _route_path(path: str) -> str:
@@ -357,10 +386,18 @@ class AsyncHTTPTransport:
                 self.last_http_version = response.http_version
                 span.set_attribute("http.status_code", response.status_code)
                 await self._raise_for_status(response)
-                async with await anyio.open_file(output, "wb") as handle:
-                    async for chunk in response.aiter_bytes():
-                        if chunk:
-                            await handle.write(chunk)
+                temporary = _create_download_temp(output)
+                try:
+                    async with await anyio.open_file(temporary, "wb") as handle:
+                        async for chunk in response.aiter_bytes():
+                            if chunk:
+                                await handle.write(chunk)
+                    await anyio.to_thread.run_sync(_fsync_download_temp, temporary)
+                    await anyio.to_thread.run_sync(os.replace, temporary, output)
+                except BaseException:
+                    with anyio.CancelScope(shield=True):
+                        await anyio.to_thread.run_sync(_remove_download_temp, temporary)
+                    raise
         return output
 
     def _request_headers(self, headers: Mapping[str, str] | None) -> dict[str, str]:

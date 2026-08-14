@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -705,6 +706,63 @@ def test_sync_http_transport_rejects_a_response_above_the_bounded_read() -> None
     with pytest.raises(FrameValidationError):
         transport.request_bounded("POST", "/v1/steps", max_bytes=4)
     transport.close()
+
+
+def test_sync_http_download_preserves_existing_destination_on_midstream_failure(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    target.write_bytes(b"old")
+    client = httpx.Client(
+        base_url="https://daemon.invalid",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_FailingSyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = HTTPTransport("https://daemon.invalid", client=client)
+    before = set(tmp_path.iterdir())
+
+    with pytest.raises(RuntimeError, match="midstream"):
+        transport.stream_download("/download", target)
+
+    assert target.read_bytes() == b"old"
+    assert set(tmp_path.iterdir()) == before
+    transport.close()
+
+
+def test_sync_http_download_replaces_existing_destination_after_success(tmp_path: Path) -> None:
+    target = tmp_path / "artifact.bin"
+    target.write_bytes(b"old")
+    client = httpx.Client(
+        base_url="https://daemon.invalid",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_SuccessfulSyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = HTTPTransport("https://daemon.invalid", client=client)
+
+    assert transport.stream_download("/download", target) == target
+    assert target.read_bytes() == b"new"
+    transport.close()
+
+
+class _FailingSyncDownloadStream(httpx.SyncByteStream):
+    def __iter__(self):
+        yield b"new"
+        raise RuntimeError("midstream")
+
+
+class _SuccessfulSyncDownloadStream(httpx.SyncByteStream):
+    def __iter__(self):
+        yield b"new"
 
 
 @pytest.mark.asyncio

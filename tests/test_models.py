@@ -34,6 +34,26 @@ def test_vnc_password_is_internal_only() -> None:
     assert value not in config.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["relative/artifacts", "/home/desktop/../escape", "/home//desktop"],
+)
+def test_storage_paths_reject_ambiguous_or_traversing_forms(path: str) -> None:
+    with pytest.raises(ValidationError, match="storage paths"):
+        ComputerConfig(storage={"artifacts_dir": path})
+
+
+def test_storage_paths_accept_absolute_normalized_posix_values() -> None:
+    config = ComputerConfig(
+        storage={
+            "artifacts_dir": "/srv/computer-use/artifacts",
+            "recordings_dir": "/srv/computer-use/recordings",
+            "trace_dir": "/srv/computer-use/traces",
+        }
+    )
+    assert config.storage.artifacts_dir == "/srv/computer-use/artifacts"
+
+
 def test_runtime_modal_region_rejects_empty_string() -> None:
     with pytest.raises(ValidationError, match="modal_region must be non-empty"):
         ComputerConfig(runtime={"modal_region": "   "})

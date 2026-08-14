@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -321,6 +324,45 @@ def test_artifact_upload_restores_target_and_manifest_on_commit_failure(
     assert response.status_code == 500
     assert app.state.artifacts.read_bytes("report.txt") == b"original"
     assert app.state.artifacts.manifest_path.read_bytes() == manifest_before
+
+
+def test_staged_artifact_commit_survives_parent_symlink_swap(tmp_path, monkeypatch) -> None:
+    """A parent replacement at the commit boundary cannot redirect the upload."""
+    store = ArtifactStore(tmp_path / "root")
+    target_parent = store.root / "nested"
+    target_parent.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    upload_dir = store.root / ".control" / "uploads"
+    upload_dir.mkdir(parents=True)
+    payload = b"descriptor-relative"
+    with tempfile.NamedTemporaryFile(dir=upload_dir, delete=False) as handle:
+        handle.write(payload)
+        staged = Path(handle.name)
+
+    def swap_parent() -> None:
+        target_parent.rename(store.root / "nested-original")
+        target_parent.symlink_to(outside, target_is_directory=True)
+
+    original_open_directory = store._open_directory_chain
+
+    def open_directory(relative: str, *, create: bool) -> int:
+        descriptor = original_open_directory(relative, create=create)
+        if relative == "nested":
+            swap_parent()
+        return descriptor
+
+    monkeypatch.setattr(store, "_open_directory_chain", open_directory)
+    commit = store.commit_staged_upload(
+        staged,
+        "nested/result.txt",
+        size_bytes=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    commit.finalize()
+
+    assert (store.root / "nested-original" / "result.txt").read_bytes() == payload
+    assert not (outside / "result.txt").exists()
 
 
 def test_artifact_upload_reuses_streaming_digest_without_second_read(

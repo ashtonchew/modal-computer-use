@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json as json_module
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+if importlib.util.find_spec("modal") is None:
+    pytest.skip("Modal benchmark runner requires the optional modal extra", allow_module_level=True)
 
 from modal_computer_use.benchmarks.full_screenshot_sdk_harness import (
     _EXPECTED_PAYLOAD,

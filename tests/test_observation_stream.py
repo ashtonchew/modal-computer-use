@@ -3262,6 +3262,164 @@ def test_observation_transport_run_actions_observe_change_receives_correlated_fr
     assert transport.receive_frame().payload == b"old"
 
 
+@pytest.mark.parametrize(
+    ("method", "payload"),
+    [
+        ("pause", None),
+        ("resume", None),
+        ("configure", {"fps": 10}),
+        ("stop", None),
+    ],
+)
+def test_observation_transport_controls_consume_correlated_result_and_buffer_frames(
+    method: str,
+    payload: dict[str, object] | None,
+) -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "frame", "seq": 1, "kind": "keyframe"}),
+            b"before-result",
+            json.dumps({"type": "result", "id": "1", "ok": True, "result": {}}),
+            json.dumps({"type": "frame", "seq": 2, "kind": "keyframe"}),
+            b"after-result",
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    if payload is None:
+        getattr(transport, method)()
+    else:
+        getattr(transport, method)(payload)
+
+    assert transport.receive_frame().payload == b"before-result"
+    assert transport.receive_frame().payload == b"after-result"
+    sent = json.loads(websocket.sent[0])
+    assert sent["op"] == method
+
+
+def test_observation_transport_control_raises_correlated_error() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps(
+                {
+                    "type": "error",
+                    "id": "1",
+                    "ok": False,
+                    "error": {"code": "stream_not_started", "message": "start first"},
+                }
+            ),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(DaemonHTTPError) as exc_info:
+        transport.pause()
+
+    assert exc_info.value.code == "stream_not_started"
+
+
+def test_observation_transport_control_dispatch_preserves_binary_timing() -> None:
+    before = observation_routes._encode_frame_envelope(
+        {
+            "type": "frame",
+            "seq": 1,
+            "kind": "keyframe",
+            "server_emit_timing_ms": {"emit_total_ms": 1.0},
+        },
+        b"before-result",
+    )
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            before,
+            json.dumps({"type": "result", "id": "2", "ok": True, "result": {}}),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"transport_timing": True, "frame_encoding": "binary-envelope"})
+
+    transport.pause()
+    frame = transport.recv_frame_with_timing()
+
+    assert frame.payload == b"before-result"
+    assert frame.transport_timing is not None
+    assert frame.transport_timing["server_emit_timing_ms"]["emit_total_ms"] == 1.0
+
+
+def test_observation_configure_uses_new_timing_for_interleaved_frame() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            json.dumps({"type": "frame", "seq": 1, "kind": "keyframe"}),
+            b"after-configure",
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "seq": 1,
+                    "server_emit_timing_ms": {"emit_total_ms": 2.0},
+                }
+            ),
+            json.dumps({"type": "result", "id": "2", "ok": True, "result": {}}),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"transport_timing": False})
+
+    transport.configure({"transport_timing": True})
+    frame = transport.recv_frame_with_timing()
+
+    assert frame.payload == b"after-configure"
+    assert frame.transport_timing is not None
+    assert frame.transport_timing["server_emit_timing_ms"]["emit_total_ms"] == 2.0
+
+
+def test_observation_configure_accepts_old_timing_frame_during_transition() -> None:
+    websocket = _FakeWebSocket(
+        [
+            json.dumps({"type": "ready"}),
+            json.dumps({"type": "started", "id": "1"}),
+            json.dumps({"type": "frame", "seq": 1, "kind": "keyframe"}),
+            b"before-configure",
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "seq": 1,
+                    "server_emit_timing_ms": {"emit_total_ms": 3.0},
+                }
+            ),
+            json.dumps({"type": "result", "id": "2", "ok": True, "result": {}}),
+        ]
+    )
+    transport = ObservationStreamTransport(
+        "http://daemon.test",
+        websocket=websocket,  # type: ignore[arg-type]
+    )
+    transport.start({"transport_timing": True})
+
+    transport.configure({"transport_timing": False})
+    frame = transport.recv_frame_with_timing()
+
+    assert frame.payload == b"before-configure"
+    assert frame.transport_timing is not None
+    assert frame.transport_timing["server_emit_timing_ms"]["emit_total_ms"] == 3.0
+
+
 def test_leased_sync_observation_waits_for_match_and_buffers_unrelated_frames() -> None:
     websocket = _FakeWebSocket(
         [

@@ -102,6 +102,7 @@ class ObservationStreamTransport:
         self.setup_retry_errors: list[dict[str, str]] = []
         self._next_id = 1
         self._pending_frames: deque[ObservationFrame] = deque()
+        self._transport_timing = False
         if websocket is None:
             self._websocket = self._connect_with_retries(timeout=timeout)
         else:
@@ -170,15 +171,19 @@ class ObservationStreamTransport:
                 "unexpected observation stream start response",
                 code="observation_stream_protocol_error",
             )
+        self._transport_timing = bool(payload.get("transport_timing"))
 
     def stop(self) -> None:
-        self._send("stop", {})
+        request_id = self._send("stop", {})
+        self._receive_correlated_result(request_id)
 
     def pause(self) -> None:
-        self._send("pause", {})
+        request_id = self._send("pause", {})
+        self._receive_correlated_result(request_id)
 
     def resume(self) -> None:
-        self._send("resume", {})
+        request_id = self._send("resume", {})
+        self._receive_correlated_result(request_id)
 
     def request_frame(self) -> None:
         self._send("capture_now", {})
@@ -242,7 +247,13 @@ class ObservationStreamTransport:
             self._buffer_frame(frame)
 
     def configure(self, payload: dict[str, Any]) -> None:
-        self._send("configure", payload)
+        request_id = self._send("configure", payload)
+        configured_transport_timing = bool(
+            payload.get("transport_timing", self._transport_timing)
+        )
+        self._receive_correlated_result(request_id)
+        if "transport_timing" in payload:
+            self._transport_timing = configured_transport_timing
 
     def transport_probe(
         self,
@@ -467,8 +478,13 @@ class ObservationStreamTransport:
             return self._pending_frames.popleft()
         return self._receive_frame(transport_timing=transport_timing)
 
-    def _receive_frame(self, *, transport_timing: bool = False) -> ObservationFrame:
-        message = self._websocket.recv(timeout=self.timeout)
+    def _receive_frame(
+        self,
+        *,
+        transport_timing: bool = False,
+        _message: str | bytes | None = None,
+    ) -> ObservationFrame:
+        message = _message if _message is not None else self._websocket.recv(timeout=self.timeout)
         if isinstance(message, bytes):
             data, frame = _decode_frame_envelope(message)
         else:
@@ -575,6 +591,68 @@ class ObservationStreamTransport:
                 code="observation_stream_protocol_error",
             )
         return data
+
+    def _receive_correlated_result(self, request_id: str) -> dict[str, Any]:
+        """Wait for one control result while dispatching unsolicited frames."""
+        pending_frame: ObservationFrame | None = None
+        while True:
+            message = self._websocket.recv(timeout=self.timeout)
+            if isinstance(message, bytes):
+                data, _ = _decode_frame_envelope(message)
+            elif isinstance(message, str):
+                data = json.loads(message)
+            else:
+                raise DaemonHTTPError(
+                    "unexpected observation stream response",
+                    code="observation_stream_protocol_error",
+                )
+            if not isinstance(data, dict):
+                raise DaemonHTTPError(
+                    "unexpected observation stream response",
+                    code="observation_stream_protocol_error",
+                )
+            kind = data.get("type")
+            if kind == "transport_timing":
+                if pending_frame is None or data.get("seq") != pending_frame.metadata.get("seq"):
+                    raise DaemonHTTPError(
+                        "unexpected observation transport timing frame",
+                        code="observation_stream_protocol_error",
+                    )
+                self._buffer_frame(
+                    ObservationFrame(
+                        payload=pending_frame.payload,
+                        metadata=pending_frame.metadata,
+                        transport_timing=data,
+                    )
+                )
+                pending_frame = None
+                continue
+            if pending_frame is not None:
+                self._buffer_frame(pending_frame)
+                pending_frame = None
+            if kind in {"frame", "unchanged"}:
+                frame = self._receive_frame(
+                    transport_timing=isinstance(data.get("server_emit_timing_ms"), dict),
+                    _message=message,
+                )
+                if frame.transport_timing is None:
+                    pending_frame = frame
+                else:
+                    self._buffer_frame(frame)
+                continue
+            if kind == "error":
+                if data.get("id") != request_id:
+                    raise DaemonHTTPError(
+                        "unexpected observation stream response id",
+                        code="observation_stream_protocol_error",
+                    )
+                self._raise_observation_error(data)
+            if kind == "result" and data.get("id") == request_id:
+                return data
+            raise DaemonHTTPError(
+                "unexpected observation stream response",
+                code="observation_stream_protocol_error",
+            )
 
     def _recv_transport_timing(self, *, expected_seq: Any) -> dict[str, Any]:
         message = self._websocket.recv(timeout=self.timeout)

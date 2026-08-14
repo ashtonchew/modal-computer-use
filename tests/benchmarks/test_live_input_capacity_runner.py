@@ -7,6 +7,9 @@ from typing import Any
 
 import pytest
 
+if importlib.util.find_spec("modal") is None:
+    pytest.skip("Modal benchmark runner requires the optional modal extra", allow_module_level=True)
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = ROOT / "scripts" / "run_input_capacity_gate.py"
 

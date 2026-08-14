@@ -50,7 +50,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 | Area | v9 canonical state |
 | --- | --- |
 | Source version | The package, daemon, and OpenAPI report `2.0.0`; Python 3.12+ and `uv` are the maintained development baseline. The release tag will be `v2.0.0`. |
-| Modal SDK | The compatible line remains `modal~=1.5.2`. Every Connect Token is explicitly scoped to daemon port 8080. |
+| Modal SDK | The compatible line remains `modal~=1.5.3`. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
 | Screenshots | Inline `screenshots.full()` uses the raw binary route and reconstructs a semantic, byte-backed `Screenshot`. Persistent MSS remains the production default. X11 shared-memory capture is available through explicit `x11-shm` or opt-in `auto`, but was not promoted after readiness-latency and display-restart gates failed. Captures report complete validated metadata. |
@@ -496,7 +496,7 @@ Its authoritative contract and promotion gates live in
 
 ### 8.1 Supported Modal baseline
 
-The `modal` extra pins the Modal 1.5 line and requires 1.5.2 or later. The v8 baseline was tested
+The `modal` extra pins the Modal 1.5 line and requires 1.5.3 or later. The v8 baseline was tested
 with Modal 1.5.3, the latest stable patch in the audited line on 2026-07-30. The maintained production
 path uses standard `modal.Sandbox.create`, Connect Tokens, encrypted tunnels, optional Volumes,
 tags, readiness probes, and supported snapshot methods. Modal 1.5.3 offers the Beta

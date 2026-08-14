@@ -73,6 +73,20 @@ def test_dependency_metadata_keeps_intentional_compatibility_contracts() -> None
     assert document["tool"]["uv"]["required-version"] == "==0.12.3"
 
 
+def test_maintained_modal_sdk_docs_match_the_optional_dependency_floor() -> None:
+    document = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    requirement = document["project"]["optional-dependencies"]["modal"][0]
+    assert requirement == "modal~=1.5.3"
+    for path in (
+        ROOT / "README.md",
+        ROOT / "docs" / "spec" / "product-spec.md",
+        ROOT / "examples" / "run_gateway" / "modal_adapter.py",
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert "1.5.3" in source, path.relative_to(ROOT)
+        assert "1.5.2" not in source, path.relative_to(ROOT)
+
+
 def test_project_version_matches_runtime_and_openapi() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     openapi = json.loads((ROOT / "docs" / "openapi.json").read_text(encoding="utf-8"))

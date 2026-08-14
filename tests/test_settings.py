@@ -30,6 +30,22 @@ def test_daemon_settings_read_environment_when_instantiated(monkeypatch, tmp_pat
     assert settings.subprocess_backend == "threaded"
 
 
+@pytest.mark.parametrize("setting", [
+    "COMPUTER_USE_ARTIFACTS_DIR",
+    "COMPUTER_USE_RECORDINGS_DIR",
+    "COMPUTER_USE_TRACE_DIR",
+])
+@pytest.mark.parametrize("value", ["relative/path", "/home/desktop/../escape", "/home//desktop"])
+def test_daemon_settings_reject_malformed_storage_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
+) -> None:
+    monkeypatch.setenv(setting, value)
+    with pytest.raises(ValueError, match=setting):
+        get_settings()
+
+
 def test_daemon_settings_use_sdk_primitive_defaults(monkeypatch) -> None:
     for key in (
         "COMPUTER_USE_DESKTOP_WIDTH",

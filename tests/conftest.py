@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,6 +10,20 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.sandbox import ComputerSandbox
 from modal_computer_use.transports.http import HTTPTransport
+
+_MODAL_LIVE_OPT_IN = "MODAL_COMPUTER_USE_RUN_LIVE_TESTS"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep credentialed Modal smoke tests non-billable by default."""
+    if os.getenv(_MODAL_LIVE_OPT_IN) == "1":
+        return
+    skip_live = pytest.mark.skip(
+        reason=f"set {_MODAL_LIVE_OPT_IN}=1 in a protected environment to run live Modal tests"
+    )
+    for item in items:
+        if item.get_closest_marker("modal") is not None:
+            item.add_marker(skip_live)
 
 
 @pytest.fixture()

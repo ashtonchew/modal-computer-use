@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+if importlib.util.find_spec("modal") is None:
+    pytest.skip("Modal benchmark runner requires the optional modal extra", allow_module_level=True)
+
 _RUNNER_PATH = (
     Path(__file__).resolve().parents[2]
     / "scripts"

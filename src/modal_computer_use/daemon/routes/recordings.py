@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from html import escape
 from pathlib import Path
 
@@ -21,25 +22,35 @@ async def start(payload: RecordingStartRequest, request: Request) -> Recording:
             name=payload.name, fps=payload.fps, format=payload.format
         )
 
+    async def rollback(recording: Recording) -> None:
+        await asyncio.to_thread(request.app.state.recordings.delete, recording.id)
+
     return await run_recording_start(
         request,
         operation,
         semantic_data=payload,
-        rollback=lambda rec: request.app.state.recordings.delete(rec.id),
+        rollback=rollback,
     )
 
 
 @router.post("/{recording_id}/stop")
 async def stop(recording_id: str, request: Request) -> Recording:
     async def operation() -> Recording:
-        return request.app.state.recordings.stop(recording_id, append_manifest=False)
+        return await asyncio.to_thread(
+            request.app.state.recordings.stop,
+            recording_id,
+            append_manifest=False,
+        )
+
+    async def rollback(_recording: Recording) -> None:
+        await asyncio.to_thread(request.app.state.recordings.delete, recording_id)
 
     rec = await run_idle_only_mutation(
         request,
         operation,
         semantic_data={"recording_id": recording_id},
         enforce_after=("recordings", "artifacts"),
-        rollback=lambda _rec: request.app.state.recordings.delete(recording_id),
+        rollback=rollback,
         after_success=lambda _rec: request.app.state.recordings.append_manifest(recording_id),
     )
     return rec
@@ -71,7 +82,7 @@ async def download(recording_id: str, request: Request) -> FileResponse:
 @router.delete("/{recording_id}")
 async def delete(recording_id: str, request: Request) -> dict[str, bool]:
     async def operation() -> dict[str, bool]:
-        request.app.state.recordings.delete(recording_id)
+        await asyncio.to_thread(request.app.state.recordings.delete, recording_id)
         return {"ok": True}
 
     return await run_idle_only_mutation(

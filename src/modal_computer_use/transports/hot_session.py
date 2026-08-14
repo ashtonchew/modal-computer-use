@@ -4,6 +4,7 @@ import itertools
 import json
 import threading
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,17 @@ from modal_computer_use.transports.metadata import MetadataHeaders, resolve_meta
 from modal_computer_use.transports.websocket_url import daemon_websocket_url
 
 _OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
+
+
+def _is_daemon_error(message: dict[str, Any] | None) -> bool:
+    if message is None or message.get("type") != "error":
+        return False
+    error = message.get("error")
+    return bool(
+        isinstance(error, dict)
+        and isinstance(error.get("code"), str)
+        and isinstance(error.get("message"), str)
+    )
 
 
 @dataclass(frozen=True)
@@ -47,6 +59,8 @@ class HotSessionTransport:
         self._mutation_executor = _mutation_executor
         self._ids = itertools.count(1)
         self._lock = threading.RLock()
+        self._closed = False
+        self._poisoned = False
         self._websocket = websocket or self._connect(timeout=timeout)
         try:
             ready = self._websocket.recv(timeout=timeout)
@@ -61,7 +75,11 @@ class HotSessionTransport:
             )
 
     def close(self) -> None:
-        self._websocket.close()
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._websocket.close()
 
     def ping(self) -> dict[str, Any]:
         return self.request("ping", {})
@@ -81,14 +99,24 @@ class HotSessionTransport:
         metadata: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            message = self._send(op, payload, metadata=metadata)
+            self._ensure_usable()
+            message: dict[str, Any] | None = None
+            try:
+                message = self._send(op, payload, metadata=metadata)
+                if message.get("type") == "error" and not _is_daemon_error(message):
+                    self._raise_hot_error(message)
+                if message.get("type") not in {"error", "result"}:
+                    raise DaemonHTTPError(
+                        "unexpected hot session response",
+                        code="hot_session_protocol_error",
+                    )
+            except BaseException:
+                if op in self._MUTATING_OPS and not _is_daemon_error(message):
+                    self._poison_and_close()
+                raise
+            assert message is not None
         if message.get("type") == "error":
             self._raise_hot_error(message)
-        if message.get("type") != "result":
-            raise DaemonHTTPError(
-                "unexpected hot session response",
-                code="hot_session_protocol_error",
-            )
         result = message.get("result")
         return result if isinstance(result, dict) else {}
 
@@ -107,20 +135,34 @@ class HotSessionTransport:
         metadata: Mapping[str, str] | None = None,
     ) -> HotSessionBinaryResult:
         with self._lock:
-            message = self._send(op, payload, metadata=metadata)
+            self._ensure_usable()
+            message: dict[str, Any] | None = None
+            frame: object | None = None
+            try:
+                message = self._send(op, payload, metadata=metadata)
+                if message.get("type") == "error":
+                    if not _is_daemon_error(message):
+                        self._raise_hot_error(message)
+                elif message.get("type") != "binary":
+                    raise DaemonHTTPError(
+                        "unexpected hot session response",
+                        code="hot_session_protocol_error",
+                    )
+                else:
+                    frame = self._websocket.recv(timeout=self.timeout)
+                    if not isinstance(frame, bytes):
+                        raise DaemonHTTPError(
+                            "hot session binary payload missing",
+                            code="hot_session_protocol_error",
+                        )
+            except BaseException:
+                if op in self._MUTATING_OPS and not _is_daemon_error(message):
+                    self._poison_and_close()
+                raise
+            assert message is not None
             if message.get("type") == "error":
                 self._raise_hot_error(message)
-            if message.get("type") != "binary":
-                raise DaemonHTTPError(
-                    "unexpected hot session response",
-                    code="hot_session_protocol_error",
-                )
-            frame = self._websocket.recv(timeout=self.timeout)
-        if not isinstance(frame, bytes):
-            raise DaemonHTTPError(
-                "hot session binary payload missing",
-                code="hot_session_protocol_error",
-            )
+        assert isinstance(frame, bytes)
         headers = message.get("headers")
         result = message.get("result")
         return HotSessionBinaryResult(
@@ -131,6 +173,21 @@ class HotSessionTransport:
             if isinstance(message.get("content_type"), str)
             else None,
         )
+
+    def _ensure_usable(self) -> None:
+        if self._poisoned:
+            raise DaemonHTTPError(
+                "hot session is unusable after an uncertain mutation",
+                code="hot_session_poisoned",
+            )
+        if self._closed:
+            raise DaemonHTTPError("hot session is closed", code="hot_session_closed")
+
+    def _poison_and_close(self) -> None:
+        self._poisoned = True
+        self._closed = True
+        with suppress(Exception):
+            self._websocket.close()
 
     def _connect(self, *, timeout: float) -> ClientConnection:
         headers = resolve_metadata_headers(self._metadata_headers)

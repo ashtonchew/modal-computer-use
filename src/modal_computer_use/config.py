@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import warnings
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -145,6 +147,39 @@ class StorageConfig(StrictBaseModel):
     artifacts_dir: str = "/home/desktop/artifacts"
     persist_artifacts: bool = False
     trace_dir: str = "/home/desktop/artifacts/traces"
+
+    @field_validator("recordings_dir", "artifacts_dir", "trace_dir", mode="before")
+    @classmethod
+    def _valid_storage_path(cls, value: object) -> str:
+        """Require an unambiguous, absolute POSIX storage path.
+
+        These values are passed to a daemon running on Linux and later used as
+        artifact roots.  Rejecting paths that need normalization keeps traversal
+        and platform-specific spellings from reaching either side of the
+        SDK/daemon boundary.
+        """
+        if isinstance(value, str):
+            value_string = value
+        elif isinstance(value, os.PathLike):
+            value_string = os.fspath(value)
+        else:
+            raise ValueError("storage paths must be strings or path-like values")
+        if not isinstance(value_string, str):
+            raise ValueError("storage paths must be strings or path-like values")
+        if not value_string or value_string != value_string.strip():
+            raise ValueError("storage paths must be non-empty and free of surrounding whitespace")
+        if "\x00" in value_string:
+            raise ValueError("storage paths must not contain NUL bytes")
+        if "\\" in value_string:
+            raise ValueError("storage paths must use POSIX separators")
+        if not value_string.startswith("/") or value_string.startswith("//"):
+            raise ValueError("storage paths must be absolute POSIX paths")
+        path = PurePosixPath(value_string)
+        if any(part in {".", ".."} for part in path.parts):
+            raise ValueError("storage paths must not contain dot components")
+        if path.as_posix() != value_string:
+            raise ValueError("storage paths must be normalized POSIX paths")
+        return value_string
 
 
 class BrowserConfig(StrictBaseModel):

@@ -13,6 +13,7 @@ from modal_computer_use.daemon.receipts import (
     MAX_OPERATION_SEQUENCE,
     RECEIPT_PROTOCOL_VERSION,
 )
+from modal_computer_use.daemon.routes.leases import _release_all_before_lease_transition
 
 router = APIRouter(include_in_schema=False)
 OWNER_PROOF_HEADER = "x-computer-use-owner-proof"
@@ -202,6 +203,14 @@ async def _acknowledge_and_reset_cancellation_safe(
     incident_id: str,
 ) -> dict[str, object]:
     async def acknowledge_and_reset() -> dict[str, object]:
+        async with state.lease_lock:
+            lease_status = state.lease_coordinator.status()
+        run_id = lease_status.get("run_id")
+        await _release_all_before_lease_transition(
+            state,
+            run_id if isinstance(run_id, str) else None,
+            force=True,
+        )
         result = await state.receipt_journal.acknowledge(incident_id)
         async with state.lease_lock:
             state.lease_coordinator.reset_after_owner_recovery()
@@ -232,6 +241,11 @@ async def _resolve_and_release_cancellation_safe(
     async def resolve_and_release() -> dict[str, object]:
         result = await state.receipt_journal.resolve(run_id, sequence)
         if result["state"] == "MISSING":
+            await _release_all_before_lease_transition(
+                state,
+                admitted_lease.run_id,
+                force=True,
+            )
             async with state.lease_lock:
                 state.lease_coordinator.release_validated(admitted_lease)
         return result

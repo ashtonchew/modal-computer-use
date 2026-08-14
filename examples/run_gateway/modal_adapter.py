@@ -1,4 +1,4 @@
-"""Modal 1.5.2 Function adapter and hosted App wiring."""
+"""Modal 1.5.3 Function adapter and hosted App wiring."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ _DEFAULT_MODAL = object()
 
 
 class ModalTrajectoryDispatcher:
-    """Modal 1.5.2 adapter for one application-owned deployed Function."""
+    """Modal 1.5.3 adapter for one application-owned deployed Function."""
 
     def __init__(self, function: object, *, modal_runtime: Any = _DEFAULT_MODAL) -> None:
         if function is None:

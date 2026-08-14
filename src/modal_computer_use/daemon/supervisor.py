@@ -143,7 +143,7 @@ class Supervisor:
             if process is None or process.poll() is not None:
                 continue
             try:
-                _stop_process(process)
+                await asyncio.to_thread(_stop_process, process)
             except Exception as exc:
                 if first_error is None:
                     first_error = exc
@@ -165,7 +165,7 @@ class Supervisor:
             self.restart_counts[name] = self.restart_counts.get(name, 0) + 1
             process = self.processes.get(name)
             if process is not None and process.poll() is None:
-                _stop_process(process)
+                await asyncio.to_thread(_stop_process, process)
             if self.settings.backend != "mock":
                 command = self.commands.get(name)
                 if command is not None:

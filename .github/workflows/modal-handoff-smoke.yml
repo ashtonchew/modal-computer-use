@@ -74,6 +74,7 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
+          MODAL_COMPUTER_USE_RUN_LIVE_TESTS: "1"
           MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE: "1"
         run: |
           if ! uv run pytest -m modal tests/test_modal_integration.py \

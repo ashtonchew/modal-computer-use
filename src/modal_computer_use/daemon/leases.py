@@ -94,6 +94,7 @@ class LeaseCoordinator:
         self._fence = 0
         self._lease: _Lease | None = None
         self._run_state: Literal["none", "active", "released", "interrupted"] = "none"
+        self._input_cleanup_required = False
 
     def acquire(self, run_id: str) -> LeaseGrant:
         if not run_id.strip():
@@ -117,6 +118,7 @@ class LeaseCoordinator:
         self._lease = lease
         self._state = "active"
         self._run_state = "active"
+        self._input_cleanup_required = False
         return LeaseGrant(
             lease_id=lease.lease_id,
             run_id=lease.run_id,
@@ -189,6 +191,19 @@ class LeaseCoordinator:
         if self._state == "active":
             self._state = "released"
             self._run_state = "interrupted"
+
+    def input_cleanup_required(self, run_id: str) -> bool:
+        lease = self._lease
+        return bool(
+            self._input_cleanup_required
+            and lease is not None
+            and secrets.compare_digest(lease.run_id, run_id)
+        )
+
+    def mark_input_cleanup_complete(self, run_id: str) -> None:
+        lease = self._lease
+        if lease is not None and secrets.compare_digest(lease.run_id, run_id):
+            self._input_cleanup_required = False
 
     def validate_mutation(self, credentials: LeaseCredentials | None) -> MutationLease | None:
         self._expire_if_needed()
@@ -291,6 +306,7 @@ class LeaseCoordinator:
         ):
             self._state = "expired"
             self._run_state = "interrupted"
+            self._input_cleanup_required = True
 
     def _remaining_seconds(self) -> float:
         if self._lease is None:

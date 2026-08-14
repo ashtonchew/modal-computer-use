@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from modal_computer_use import __version__
+from modal_computer_use._version import __version__
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.auth import AuthMiddleware
 from modal_computer_use.daemon.budget_policy import BudgetPolicy

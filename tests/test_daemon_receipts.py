@@ -157,6 +157,43 @@ def test_only_predispatch_receipt_connection_requests_full(tmp_path, monkeypatch
     assert synchronous_modes == ["NORMAL", "FULL", "NORMAL", "NORMAL", "NORMAL"]
 
 
+def test_quarantine_persistence_failure_remains_acknowledgeable(
+    tmp_path, monkeypatch
+) -> None:
+    journal = ReceiptJournal(tmp_path / "runtime")
+
+    async def exercise() -> None:
+        await journal.start()
+
+        def fail_quarantine(*_args: Any) -> None:
+            raise OSError("receipt database unavailable")
+
+        def fail_recovery_status(*_args: Any) -> None:
+            raise OSError("receipt database unavailable")
+
+        monkeypatch.setattr(journal, "_quarantine_sync", fail_quarantine)
+        original_recovery_status = journal._recovery_status_sync
+        monkeypatch.setattr(journal, "_recovery_status_sync", fail_recovery_status)
+        with pytest.raises(OSError):
+            await journal.quarantine_run(
+                "run-quarantine-failure",
+                classification="lease_cleanup_failed",
+            )
+
+        recovery = await journal.recovery_status()
+        assert recovery["recovery_required"] is True
+        incident_id = recovery["incident_id"]
+        assert isinstance(incident_id, str) and incident_id.startswith("incident_")
+        assert recovery["classification"] == "lease_cleanup_failed"
+        acknowledged = await journal.acknowledge(incident_id)
+        assert acknowledged == {"recovery_required": False, "acknowledged": True}
+        monkeypatch.setattr(journal, "_recovery_status_sync", original_recovery_status)
+        assert (await journal.recovery_status())["recovery_required"] is False
+        await journal.close()
+
+    asyncio.run(exercise())
+
+
 def test_full_receipt_commit_returns_before_mutation_dispatch(
     tmp_path, monkeypatch
 ) -> None:

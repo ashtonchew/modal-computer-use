@@ -193,14 +193,27 @@ class ReceiptJournal:
     async def seal_run(self, run_id: str, reason: str) -> None:
         await self._call(self._seal_run_sync, run_id, reason)
 
+    async def quarantine_run(self, run_id: str | None, *, classification: str) -> str:
+        """Durably block new leases after cleanup cannot prove input is released."""
+        incident_id = f"incident_{secrets.token_urlsafe(24)}"
+        self._recovery_required = True
+        self._incident_id = incident_id
+        self._memory_classification = classification
+        self._volatile_recovery = True
+        self._volatile_run_id = run_id
+        await self._call(self._quarantine_sync, run_id, classification, incident_id)
+        self._volatile_recovery = False
+        self._volatile_run_id = None
+        return incident_id
+
     async def recovery_status(self) -> dict[str, Any]:
-        durable = await self._call(self._recovery_status_sync)
         if self._volatile_recovery:
             return {
                 "recovery_required": True,
                 "incident_id": self._incident_id,
                 "classification": self._memory_classification,
             }
+        durable = await self._call(self._recovery_status_sync)
         return durable
 
     async def acknowledge(self, incident_id: str) -> dict[str, Any]:
@@ -611,6 +624,34 @@ class ReceiptJournal:
                        seal_reason = excluded.seal_reason, updated_at = excluded.updated_at
                    WHERE runs.sealed = 0""",
                 (run_id, reason, now),
+            )
+            connection.commit()
+
+    def _quarantine_sync(
+        self,
+        run_id: str | None,
+        classification: str,
+        incident_id: str,
+    ) -> None:
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if run_id is not None:
+                connection.execute(
+                    """INSERT OR IGNORE INTO runs
+                       (run_id, next_sequence, sealed, seal_reason, updated_at)
+                       VALUES (?, 0, 1, 'indeterminate', ?)""",
+                    (run_id, now),
+                )
+                connection.execute(
+                    """UPDATE runs SET sealed = 1, seal_reason = 'indeterminate',
+                       updated_at = ? WHERE run_id = ?""",
+                    (now, run_id),
+                )
+            connection.execute(
+                """UPDATE recovery SET recovery_required = 1, incident_id = ?,
+                   classification = ?, updated_at = ? WHERE singleton = 1""",
+                (incident_id, classification, now),
             )
             connection.commit()
 

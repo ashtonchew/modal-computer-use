@@ -129,6 +129,55 @@ def test_windows_wait_for_filters_class_name(test_client, app) -> None:
     assert response.json()["id"] == "two"
 
 
+def test_windows_wait_for_preserves_ordinary_regex_features(test_client) -> None:
+    wildcard = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r".*Mock.*", "timeout": 0.1},
+    )
+    character_class = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"^Mock [A-Za-z ]+$", "timeout": 0.1},
+    )
+    escaped_classes = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"Mock\s+\w+", "timeout": 0.1},
+    )
+    deterministic_alternation = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"^(Mock|Terminal)$", "timeout": 0.01},
+    )
+
+    assert wildcard.status_code == 200
+    assert character_class.status_code == 200
+    assert escaped_classes.status_code == 200
+    assert deterministic_alternation.status_code == 404
+    assert wildcard.json()["title"] == "Mock Desktop"
+    assert character_class.json()["title"] == "Mock Desktop"
+
+
+def test_windows_wait_for_bounds_repeat_validation_without_rejecting_fixed_counts(
+    test_client, app
+) -> None:
+    app.state.supervisor.running = True
+
+    fixed_repeat = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"a{200}", "timeout": 0.01},
+    )
+    variable_repeat = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"a{0,101}", "timeout": 0.01},
+    )
+    overflow_repeat = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": "a{" + ("9" * 200) + "}", "timeout": 0.01},
+    )
+
+    assert fixed_repeat.status_code == 404
+    assert variable_repeat.status_code == 422
+    assert overflow_repeat.status_code == 422
+
+
 def test_windows_wait_for_rejects_unknown_fields(test_client, app) -> None:
     app.state.supervisor.running = True
 
@@ -157,6 +206,53 @@ def test_windows_wait_for_rejects_invalid_selectors(test_client, app) -> None:
     assert empty.status_code == 422
     assert bad_regex.status_code == 422
     assert bad_pid.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "title_regex",
+    [
+        "(a+)+$",
+        "(a|aa)+$",
+        "a*a*",
+        "a+.*X$",
+        "(?:a+)(?:a+)X$",
+        ".*a.*X$",
+        ".*a.*b.*X$",
+        "(.*a.*)X$",
+        "(?P<value>.*a.*)X$",
+        "(.*a.*)X.*$",
+        "a+(?>a+)X$",
+        ".*(?>.*a.*)X$",
+        "(?>.*a.*)X$",
+        "(?:a|aa)" * 18 + "X$",
+        "(?=a)",
+        "(?:a?){100}",
+        "(?>((a+)+))",
+    ],
+)
+def test_windows_wait_for_rejects_unsafe_regex_constructs(
+    test_client, app, title_regex: str
+) -> None:
+    app.state.supervisor.running = True
+
+    response = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": title_regex, "timeout": 0.1},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+
+
+def test_windows_wait_for_accepts_safe_atomic_repeat(test_client, app) -> None:
+    app.state.supervisor.running = True
+
+    response = test_client.post(
+        "/v1/windows/wait-for",
+        json={"title_regex": r"(?>a+)", "timeout": 0.01},
+    )
+
+    assert response.status_code == 404
 
 
 def test_windows_wait_for_rechecks_readiness_before_each_poll(test_client, app) -> None:

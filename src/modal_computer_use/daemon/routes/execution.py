@@ -138,7 +138,7 @@ async def run_recording_start[T](
     operation: Callable[[], Awaitable[T]],
     *,
     semantic_data: Any,
-    rollback: Callable[[T], None] | None = None,
+    rollback: Callable[[T], Awaitable[None] | None] | None = None,
 ) -> T:
     await ensure_desktop_ready(request)
     policy = budget_policy(request)
@@ -151,7 +151,9 @@ async def run_recording_start[T](
             policy.enforce("recordings")
         except DaemonError:
             if rollback is not None:
-                rollback(result)
+                rollback_result = rollback(result)
+                if rollback_result is not None:
+                    await rollback_result
             raise
         policy.touch_activity()
         return result
@@ -163,7 +165,7 @@ async def run_idle_only_mutation[T](
     *,
     semantic_data: Any,
     enforce_after: tuple[BudgetKind, ...] = (),
-    rollback: Callable[[T], None] | None = None,
+    rollback: Callable[[T], Awaitable[None] | None] | None = None,
     after_success: Callable[[T], None] | None = None,
 ) -> T:
     policy = budget_policy(request)
@@ -175,7 +177,9 @@ async def run_idle_only_mutation[T](
                 policy.enforce(*enforce_after)
         except DaemonError:
             if rollback is not None:
-                rollback(result)
+                rollback_result = rollback(result)
+                if rollback_result is not None:
+                    await rollback_result
             raise
         if after_success is not None:
             after_success(result)

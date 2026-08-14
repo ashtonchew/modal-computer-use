@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import mimetypes
 import os
+import secrets
+import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
@@ -108,13 +112,14 @@ class ArtifactStore:
         retention_class: str = "ephemeral",
         known_size_bytes: int | None = None,
         known_sha256: str | None = None,
+        stat_result: os.stat_result | None = None,
     ) -> ArtifactInfo:
-        stat = path.stat()
-        kind = "directory" if path.is_dir() else "file"
+        metadata = stat_result or path.stat()
+        kind = "directory" if stat.S_ISDIR(metadata.st_mode) else "file"
         digest = None
         size = None
         content_type = None
-        if path.is_file():
+        if stat.S_ISREG(metadata.st_mode):
             if known_size_bytes is not None and known_sha256 is not None:
                 size = known_size_bytes
                 digest = known_sha256
@@ -130,11 +135,173 @@ class ArtifactStore:
             size_bytes=size,
             content_type=content_type,
             sha256=digest,
-            created_at=datetime.fromtimestamp(stat.st_ctime, tz=UTC),
-            modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+            created_at=datetime.fromtimestamp(metadata.st_ctime, tz=UTC),
+            modified_at=datetime.fromtimestamp(metadata.st_mtime, tz=UTC),
             created_by_call_id=created_by_call_id,
             retention_class=retention_class,
         )
+
+    def _open_directory_chain(self, relative: str, *, create: bool) -> int:
+        """Open a directory below the artifact root without following links.
+
+        Every component is opened relative to the descriptor for its parent.  A
+        caller can therefore retain the returned descriptor across a pathname
+        rename or symlink replacement without changing the directory it refers
+        to.  Missing components are created only when explicitly requested.
+        """
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        directory = getattr(os, "O_DIRECTORY", None)
+        supports_dir_fd = getattr(os, "supports_dir_fd", ())
+        required_dir_fd = (os.open, os.stat, os.mkdir, os.rename, os.unlink)
+        if (
+            nofollow is None
+            or directory is None
+            or not all(function in supports_dir_fd for function in required_dir_fd)
+        ):
+            raise ArtifactPathError("descriptor-relative artifact commits are unsupported")
+        flags = os.O_RDONLY | directory | nofollow | getattr(os, "O_CLOEXEC", 0)
+        parts = tuple(Path(relative).parts) if relative else ()
+        fd: int | None = None
+        try:
+            fd = os.open(self.root, flags)
+            for part in parts:
+                try:
+                    child = os.open(part, flags, dir_fd=fd)
+                except FileNotFoundError:
+                    if not create:
+                        raise ArtifactPathError("artifact path changed during commit") from None
+                    with contextlib.suppress(FileExistsError):
+                        os.mkdir(part, mode=0o755, dir_fd=fd)
+                    child = os.open(part, flags, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            assert fd is not None
+            result = fd
+            fd = None
+            return result
+        except ArtifactPathError:
+            raise
+        except (NotImplementedError, OSError, TypeError, ValueError) as exc:
+            raise ArtifactPathError("artifact path changed during commit") from exc
+        finally:
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
+    def _relative_to_root(self, path: Path) -> str:
+        root = Path(os.path.abspath(self.root))
+        candidate = Path(os.path.abspath(path))
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError as exc:
+            raise ArtifactPathError("staged artifact is outside the artifact root") from exc
+        return "/".join(relative.parts)
+
+    def commit_staged_upload(
+        self,
+        staged_path: Path,
+        relative: str,
+        *,
+        size_bytes: int,
+        sha256: str,
+    ) -> _StagedArtifactCommit:
+        """Atomically install a staged upload using descriptor-relative paths.
+
+        The returned commit keeps both parent descriptors open until the caller
+        either finalizes or rolls back.  This makes rollback safe even when an
+        attacker replaces a pathname component after validation.
+        """
+        public_path = normalize_artifact_path(relative)
+        target_parts = Path(public_path).parts
+        if not target_parts:
+            raise ArtifactPathError("artifact path must be relative and non-empty")
+        target_name = target_parts[-1]
+        target_parent = "/".join(target_parts[:-1])
+        staged_relative = self._relative_to_root(staged_path)
+        staged_parts = Path(staged_relative).parts
+        if not staged_parts:
+            raise ArtifactPathError("staged artifact path is invalid")
+        staged_name = staged_parts[-1]
+        staged_parent = "/".join(staged_parts[:-1])
+        target_fd = self._open_directory_chain(target_parent, create=True)
+        staged_fd: int | None = None
+        backup_name: str | None = None
+        target_handle: int | None = None
+        installed = False
+        try:
+            staged_fd = self._open_directory_chain(staged_parent, create=False)
+            staged_stat = os.stat(staged_name, dir_fd=staged_fd, follow_symlinks=False)
+            if not stat.S_ISREG(staged_stat.st_mode):
+                raise ArtifactPathError("staged artifact is not a regular file")
+            try:
+                target_stat = os.stat(target_name, dir_fd=target_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                target_stat = None
+            if target_stat is not None:
+                if stat.S_ISLNK(target_stat.st_mode):
+                    raise ArtifactPathError("artifact symlinks are not public")
+                if stat.S_ISDIR(target_stat.st_mode):
+                    raise ArtifactPathError("artifact path conflicts with an existing directory")
+                if not stat.S_ISREG(target_stat.st_mode):
+                    raise ArtifactPathError("artifact target is not a regular file")
+                backup_name = f".backup-{secrets.token_hex(16)}"
+                os.replace(
+                    target_name,
+                    backup_name,
+                    src_dir_fd=target_fd,
+                    dst_dir_fd=staged_fd,
+                )
+            os.replace(
+                staged_name,
+                target_name,
+                src_dir_fd=staged_fd,
+                dst_dir_fd=target_fd,
+            )
+            installed = True
+            target_handle = os.open(
+                target_name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=target_fd,
+            )
+            target_stat = os.fstat(target_handle)
+            info = self._info(
+                self.root / public_path,
+                public_path=public_path,
+                known_size_bytes=size_bytes,
+                known_sha256=sha256,
+                stat_result=target_stat,
+            )
+            return _StagedArtifactCommit(
+                target_fd=target_fd,
+                staged_fd=staged_fd,
+                target_name=target_name,
+                backup_name=backup_name,
+                info=info,
+                target_handle=target_handle,
+            )
+        except BaseException:
+            if backup_name is not None and staged_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.replace(
+                        backup_name,
+                        target_name,
+                        src_dir_fd=staged_fd,
+                        dst_dir_fd=target_fd,
+                    )
+            elif installed:
+                with contextlib.suppress(OSError):
+                    os.unlink(target_name, dir_fd=target_fd)
+            with contextlib.suppress(OSError):
+                os.unlink(staged_name, dir_fd=staged_fd) if staged_fd is not None else None
+            if target_handle is not None:
+                with contextlib.suppress(OSError):
+                    os.close(target_handle)
+            if staged_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(staged_fd)
+            with contextlib.suppress(OSError):
+                os.close(target_fd)
+            raise
 
     def write_bytes(
         self,
@@ -340,6 +507,46 @@ class ArtifactStore:
             synced_paths=[],
             message="artifact sync is a no-op without configured Modal Volume semantics",
         )
+
+
+@dataclass(slots=True)
+class _StagedArtifactCommit:
+    target_fd: int
+    staged_fd: int
+    target_name: str
+    backup_name: str | None
+    info: ArtifactInfo
+    target_handle: int
+
+    def rollback(self) -> None:
+        try:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(self.target_name, dir_fd=self.target_fd)
+            if self.backup_name is not None:
+                os.replace(
+                    self.backup_name,
+                    self.target_name,
+                    src_dir_fd=self.staged_fd,
+                    dst_dir_fd=self.target_fd,
+                )
+        finally:
+            self._close()
+
+    def finalize(self) -> None:
+        try:
+            if self.backup_name is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(self.backup_name, dir_fd=self.staged_fd)
+        finally:
+            self._close()
+
+    def _close(self) -> None:
+        with contextlib.suppress(OSError):
+            os.close(self.target_handle)
+        with contextlib.suppress(OSError):
+            os.close(self.staged_fd)
+        with contextlib.suppress(OSError):
+            os.close(self.target_fd)
 
 
 def _run_mountpoint_sync(path: str) -> subprocess.CompletedProcess[str]:
