@@ -108,8 +108,7 @@ def test_openai_adapter_fixture_matrix() -> None:
         "scroll",
         "type",
         "wait",
-        "keypress",
-        "keypress",
+        "hotkey",
         "drag",
         "move",
         "screenshot",
@@ -135,9 +134,9 @@ def test_openai_adapter_fixture_matrix() -> None:
     }
     assert run["actions"][2]["direction"] == "down"
     assert run["actions"][2]["amount"] == 5
-    assert [run["actions"][5]["key"], run["actions"][6]["key"]] == ["ctrl", "c"]
-    assert run["actions"][7]["modifiers"] == ["shift"]
-    assert run["actions"][7]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+    assert run["actions"][5]["keys"] == ["ctrl", "c"]
+    assert run["actions"][6]["modifiers"] == ["shift"]
+    assert run["actions"][6]["path"] == [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
 
 
 def test_openai_adapter_accepts_explicit_compatibility_shapes() -> None:
@@ -242,11 +241,29 @@ def test_openai_ga_scroll_buttons_and_modifier_fields() -> None:
     assert actions[3]["timeout_ms"] == 1234
 
 
-def test_openai_multi_native_actions_require_batch_path() -> None:
+def test_openai_keypress_normalizes_native_chords_and_single_keys() -> None:
     adapter = OpenAIAdapter(RecordingComputer())
 
-    with pytest.raises(ActionValidationError, match="require apply_many"):
-        adapter.normalize({"type": "keypress", "keys": ["CTRL", "C"]})
+    chord = adapter.normalize(
+        {
+            "type": "keypress",
+            "keys": ["CTRL", "C"],
+            "call_id": "call_chord",
+            "sequence": 7,
+            "timeout_ms": 123,
+        }
+    )
+    assert chord["type"] == "hotkey"
+    assert chord["keys"] == ["CTRL", "C"]
+    assert chord["call_id"] == "call_chord"
+    assert chord["sequence"] == 7
+    assert chord["timeout_ms"] == 123
+    assert chord["metadata"][PROVIDER_ACTION_METADATA_KEY]["keys"] == ["CTRL", "C"]
+
+    single = adapter.normalize({"type": "keypress", "keys": ["ENTER"]})
+    assert single["type"] == "keypress"
+    assert single["key"] == "ENTER"
+
     with pytest.raises(ActionValidationError, match="require apply_many"):
         adapter.normalize({"type": "scroll", "scroll_x": 100, "scroll_y": 100})
 

@@ -348,25 +348,55 @@ async def test_openai_expanded_batch_bound_counts_modifier_action_trees() -> Non
 
 
 @pytest.mark.asyncio
-async def test_openai_trajectory_bound_counts_expanded_provider_actions() -> None:
+async def test_openai_trajectory_bound_counts_native_hotkey_as_one_action() -> None:
     example = load_example("03_openai_computer_loop.py")
     computer = AsyncRecordingComputer()
     client, _ = _client(
         _response(
             "resp_1",
             ("call_1", [{"type": "keypress", "keys": ["CTRL", "C"]}]),
-        )
+        ),
+        _response("resp_2", output_text="done"),
     )
 
-    with pytest.raises(RuntimeError, match="exceeded 1 trajectory actions"):
-        await example.run_openai_computer_loop(
-            client=client,
-            computer=computer,
-            task="Inspect the page",
-            max_trajectory_actions=1,
-        )
+    response = await example.run_openai_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        max_turns=2,
+        max_trajectory_actions=1,
+    )
 
-    assert computer.steps == []
+    assert response.output_text == "done"
+    assert [[action.type for action in batch] for batch in computer.steps] == [["hotkey"]]
+
+
+@pytest.mark.asyncio
+async def test_openai_preflight_policy_sees_one_native_hotkey() -> None:
+    example = load_example("03_openai_computer_loop.py")
+    computer = AsyncRecordingComputer()
+    client, _ = _client(
+        _response(
+            "resp_1",
+            ("call_1", [{"type": "keypress", "keys": ["CTRL", "C"]}]),
+        ),
+        _response("resp_2", output_text="done"),
+    )
+    seen: list[str] = []
+
+    def policy(action: Any, _context: dict[str, Any]) -> ActionDecision:
+        seen.append(action.type)
+        return ActionDecision(decision="allow")
+
+    await example.run_openai_computer_loop(
+        client=client,
+        computer=computer,
+        task="Inspect the page",
+        max_turns=2,
+        before_action=policy,
+    )
+
+    assert seen == ["hotkey"]
 
 
 @pytest.mark.asyncio
@@ -390,8 +420,8 @@ async def test_openai_allocates_batch_deadline_across_expanded_actions_and_frame
         max_elapsed_seconds=1.0,
     )
 
-    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 333
-    assert [action.timeout_ms for action in computer.steps[0]] == [333, 333]
+    assert computer.step_kwargs[0]["max_action_timeout_ms"] == 500
+    assert [action.timeout_ms for action in computer.steps[0]] == [500]
 
 
 @pytest.mark.asyncio
