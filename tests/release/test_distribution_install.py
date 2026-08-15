@@ -247,6 +247,13 @@ def test_distribution_daemon_uses_an_isolated_runtime_directory() -> None:
     assert '"COMPUTER_USE_RUNTIME_DIR": str(probe / "daemon-runtime")' in source
 
 
+def test_distribution_probe_uses_absolute_daemon_paths() -> None:
+    source = (ROOT / "scripts" / "smoke_distribution_install.py").read_text(encoding="utf-8")
+
+    assert 'artifacts_dir=Path.cwd() / "artifacts"' in source
+    assert 'recordings_dir=Path.cwd() / "recordings"' in source
+
+
 @pytest.fixture(scope="module")
 def built_distributions(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     return _build_distributions(tmp_path_factory.mktemp("distribution") / "dist")
