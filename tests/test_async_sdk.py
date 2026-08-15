@@ -114,6 +114,32 @@ async def test_async_http_download_preserves_existing_destination_on_cancellatio
 
 
 @pytest.mark.asyncio
+async def test_async_http_download_keeps_absent_destination_absent_on_cancellation(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_CancelledAsyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = AsyncHTTPTransport("https://daemon.example", client=http_client)
+    before = set(tmp_path.iterdir())
+
+    with pytest.raises(asyncio.CancelledError):
+        await transport.stream_download("/download", target)
+
+    assert not target.exists()
+    assert set(tmp_path.iterdir()) == before
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_async_http_download_replaces_existing_destination_after_success(
     tmp_path: Path,
 ) -> None:
@@ -407,6 +433,46 @@ async def test_async_hot_session_cancellation_poison_closes_without_replay() -> 
 
 
 @pytest.mark.asyncio
+async def test_async_hot_session_serialization_failure_does_not_poison_mutation() -> None:
+    websocket = _FakeHotWebSocket(auto_reply=True)
+    transport = AsyncHotSessionTransport("https://daemon.example", websocket=websocket)
+
+    with pytest.raises(TypeError):
+        await transport.request("run_actions", {"actions": [object()]})
+
+    assert websocket.sent == []
+    assert websocket.closed is False
+    assert transport._poisoned is False
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_hot_session_taints_safe_nonmutation_and_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _FakeHotWebSocket(auto_reply=True, response_id="unexpected")
+    second = _FakeHotWebSocket(auto_reply=True)
+
+    async def fake_connect(*_args: Any, **_kwargs: Any) -> _FakeHotWebSocket:
+        return second
+
+    monkeypatch.setattr(
+        "modal_computer_use.transports.async_hot_session.connect",
+        fake_connect,
+    )
+    transport = AsyncHotSessionTransport("https://daemon.example", websocket=first)
+
+    with pytest.raises(DaemonHTTPError) as first_error:
+        await transport.ping()
+    assert first_error.value.code == "hot_session_protocol_error"
+    assert first.closed is True
+
+    assert await transport.ping() == {"request_id": "2"}
+    assert second.closed is False
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_distinct_async_hot_clients_progress_and_fail_independently() -> None:
     blocked_websocket = _FakeHotWebSocket(auto_reply=False)
     healthy_websocket = _FakeHotWebSocket(auto_reply=True)
@@ -588,8 +654,9 @@ def _parameters_without_self(method: Any) -> list[tuple[str, inspect._ParameterK
 
 
 class _FakeHotWebSocket:
-    def __init__(self, *, auto_reply: bool) -> None:
+    def __init__(self, *, auto_reply: bool, response_id: str | None = None) -> None:
         self.auto_reply = auto_reply
+        self.response_id = response_id
         self.incoming: asyncio.Queue[str | bytes] = asyncio.Queue()
         self.incoming.put_nowait(json.dumps({"type": "ready"}))
         self.sent: list[dict[str, Any]] = []
@@ -607,7 +674,7 @@ class _FakeHotWebSocket:
             self.incoming.put_nowait(
                 json.dumps(
                     {
-                        "id": message["id"],
+                        "id": self.response_id or message["id"],
                         "type": "result",
                         "result": {"request_id": message["id"]},
                     }

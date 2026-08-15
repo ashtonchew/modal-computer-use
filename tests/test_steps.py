@@ -734,6 +734,31 @@ def test_sync_http_download_preserves_existing_destination_on_midstream_failure(
     transport.close()
 
 
+def test_sync_http_download_keeps_absent_destination_absent_on_failure(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    client = httpx.Client(
+        base_url="https://daemon.invalid",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_FailingSyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = HTTPTransport("https://daemon.invalid", client=client)
+    before = set(tmp_path.iterdir())
+
+    with pytest.raises(RuntimeError, match="midstream"):
+        transport.stream_download("/download", target)
+
+    assert not target.exists()
+    assert set(tmp_path.iterdir()) == before
+    transport.close()
+
+
 def test_sync_http_download_replaces_existing_destination_after_success(tmp_path: Path) -> None:
     target = tmp_path / "artifact.bin"
     target.write_bytes(b"old")

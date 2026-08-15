@@ -153,6 +153,18 @@ def test_sync_hot_session_poison_closes_after_uncertain_mutation(failure: Except
     assert websocket.closed is True
 
 
+def test_sync_hot_session_serialization_failure_does_not_poison_mutation() -> None:
+    websocket = _FailingHotWebSocket()
+    transport = HotSessionTransport("https://daemon.example", websocket=websocket)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError):
+        transport.request("run_actions", {"actions": [object()]})
+
+    assert websocket.sent == []
+    assert websocket.closed is False
+    assert transport._poisoned is False
+
+
 def test_sync_hot_session_poison_closes_after_mutation_protocol_failure() -> None:
     websocket = _FailingHotWebSocket(
         response=json.dumps({"type": "result", "id": "unexpected", "result": {}})
@@ -182,6 +194,33 @@ def test_sync_hot_session_poison_closes_after_malformed_error_envelope() -> None
         transport.request("run_actions", {"actions": []})
     assert second.value.code == "hot_session_poisoned"
     assert websocket.closed is True
+
+
+def test_sync_hot_session_taints_safe_nonmutation_and_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _FailingHotWebSocket(
+        response=json.dumps({"type": "result", "id": "unexpected", "result": {}})
+    )
+    second = _FailingHotWebSocket(
+        response=json.dumps(
+            {"type": "result", "id": "2", "result": {"request_id": "2"}}
+        )
+    )
+
+    def reconnect(*_args: object, **_kwargs: object) -> _FailingHotWebSocket:
+        return second
+
+    monkeypatch.setattr("modal_computer_use.transports.hot_session.connect", reconnect)
+    transport = HotSessionTransport("https://daemon.example", websocket=first)  # type: ignore[arg-type]
+
+    with pytest.raises(DaemonHTTPError) as first_error:
+        transport.ping()
+    assert first_error.value.code == "hot_session_protocol_error"
+    assert first.closed is True
+
+    assert transport.ping() == {"request_id": "2"}
+    assert second.closed is False
 
 
 class _FakeHotTransport:
