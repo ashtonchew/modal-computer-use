@@ -316,6 +316,9 @@ where stated. Artifact uploads are streamed and do not use the JSON request-body
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | `true` | Boolean. Reject credentials in URL queries; keep enabled because URLs leak into logs and history. |
 | `COMPUTER_USE_VNC_MODE` | `off` | Supported: `off`, `view_only`, `control`. The SDK generates this from `expose_vnc`. |
 | `COMPUTER_USE_VNC_PASSWORD` | unset | noVNC/x11vnc password. If VNC is enabled and unset, the daemon supervisor generates one in its private runtime directory; the Modal SDK normally generates and injects one first. Secret. |
+| `COMPUTER_USE_DAEMON_USER` | unset | Internal managed-Image service account marker. When baked into the Image, the Sandbox launcher drops the daemon to this account before startup. Do not set it on an Image that does not provide the account. |
+| `COMPUTER_USE_DESKTOP_USER` | unset | Internal managed-Image desktop account marker. Desktop subprocesses run as this separate account and fail closed if it is missing. |
+| `COMPUTER_USE_VNC_SECRET_DIR` | unset | Internal managed-Image directory for the VNC password file. It must be daemon-writable and desktop-group-readable without exposing other daemon runtime state. |
 
 ### Artifacts, recordings, traces, and runtime state
 

@@ -12,6 +12,8 @@ from starlette.types import ASGIApp
 from .errors import DaemonError
 from .settings import DaemonSettings
 
+OWNER_PROOF_HEADER = "x-computer-use-owner-proof"
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp, settings: DaemonSettings) -> None:
@@ -175,6 +177,49 @@ def require_privileged_auth(request: Request) -> None:
             status_code=403,
             code="privileged_auth_required",
         )
+
+
+def require_owner_auth(request: Request) -> None:
+    """Require the owner capability for lifecycle/display-stack mutations.
+
+    Local and static-bootstrap authentication already proves ownership: the
+    middleware accepted the configured owner bearer using a constant-time
+    comparison. Connect and minted tunnel requests must carry the original
+    static owner capability in ``X-Computer-Use-Owner-Proof``. A valid proof
+    is accepted regardless of the transport auth kind; possession of that
+    secret is the authority boundary.
+    """
+
+    auth_kind = getattr(request.state, "auth_kind", None)
+    if auth_kind in {"local", "bootstrap_tunnel"}:
+        provided = request.headers.get(OWNER_PROOF_HEADER)
+        if provided is None or _owner_proof_matches(request, provided):
+            return
+    elif has_owner_proof(request):
+        return
+    raise DaemonError(
+        "owner authorization is required",
+        status_code=403,
+        code="owner_authorization_required",
+    )
+
+
+def has_owner_proof(request: Request) -> bool:
+    """Return whether the request carries a configured owner proof."""
+
+    provided = request.headers.get(OWNER_PROOF_HEADER)
+    return isinstance(provided, str) and bool(provided) and _owner_proof_matches(request, provided)
+
+
+def _owner_proof_matches(request: Request, provided: str) -> bool:
+    settings = request.app.state.settings
+    matched = False
+    # Evaluate every configured candidate. ``or`` would short-circuit after a
+    # match and make the selected secret observable through timing.
+    for expected in (settings.tunnel_token, settings.local_token):
+        if isinstance(expected, str) and expected:
+            matched = secrets.compare_digest(expected, provided) | matched
+    return matched
 
 
 def _is_trusted_connect_proxy_request(request: Request, *, trust_private: bool = False) -> bool:

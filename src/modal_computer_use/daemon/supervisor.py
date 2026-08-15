@@ -14,7 +14,11 @@ from typing import Protocol
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ProcessStatus
 
-from .process_environment import desktop_process_environment
+from .process_environment import (
+    VNC_SECRET_DIR_ENV,
+    desktop_process_command,
+    desktop_process_environment,
+)
 
 _X_SERVER_STARTUP_TIMEOUT_SECONDS = 5.0
 _X_SERVER_STARTUP_POLL_INTERVAL_SECONDS = 0.05
@@ -50,60 +54,110 @@ class Supervisor:
         self.running = False
 
     async def start(self) -> None:
-        self.running = True
+        acquired: list[str] = []
         self.started_at = datetime.now(UTC)
         if self.settings.backend == "mock":
+            self.running = True
             return
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self._start_process(
-            "xvfb",
-            [
-                "Xvfb",
-                self.settings.display,
-                "-screen",
-                "0",
-                (
-                    f"{self.settings.desktop_width}x"
-                    f"{self.settings.desktop_height}x{self.settings.display_depth}"
-                ),
-                "-nolisten",
-                "tcp",
-                "-dpi",
-                str(self.settings.desktop_dpi),
-            ],
-        )
         try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            self._start_if_acquired(
+                acquired,
+                "xvfb",
+                [
+                    "Xvfb",
+                    self.settings.display,
+                    "-screen",
+                    "0",
+                    (
+                        f"{self.settings.desktop_width}x"
+                        f"{self.settings.desktop_height}x{self.settings.display_depth}"
+                    ),
+                    "-nolisten",
+                    "tcp",
+                    "-dpi",
+                    str(self.settings.desktop_dpi),
+                ],
+            )
             await self._wait_for_x_server_ready()
-        except Exception as startup_error:
+            wm_command = (
+                ["openbox"] if self.settings.window_manager == "openbox" else ["startxfce4"]
+            )
+            self._start_if_acquired(acquired, "window_manager", wm_command)
+            if self.settings.vnc_mode != "off":
+                password_file = self._vnc_password_file()
+                x11vnc = [
+                    "x11vnc",
+                    "-display",
+                    self.settings.display,
+                    "-localhost",
+                    "-forever",
+                    "-shared",
+                    "-passwdfile",
+                    str(password_file),
+                ]
+                if self.settings.vnc_mode == "view_only":
+                    x11vnc.append("-viewonly")
+                self._start_if_acquired(acquired, "x11vnc", x11vnc)
+                self._start_if_acquired(
+                    acquired,
+                    "novnc",
+                    ["websockify", "--web=/usr/share/novnc/", "6080", "127.0.0.1:5900"],
+                )
+        except BaseException as startup_error:
+            self.running = False
+            rollback_task = asyncio.create_task(self._rollback_start(acquired))
+            cancellation: asyncio.CancelledError | None = None
             try:
-                await self.stop()
-            except Exception as cleanup_error:
+                while True:
+                    try:
+                        await asyncio.shield(rollback_task)
+                        break
+                    except asyncio.CancelledError as exc:
+                        if cancellation is None:
+                            cancellation = exc
+                        continue
+            except BaseException as cleanup_error:
                 startup_error.add_note(
                     "display stack cleanup also failed: "
                     f"{type(cleanup_error).__name__}"
                 )
+            if cancellation is not None:
+                startup_error.add_note("display stack startup was cancelled")
             raise
-        wm_command = ["openbox"] if self.settings.window_manager == "openbox" else ["startxfce4"]
-        self._start_process("window_manager", wm_command)
-        if self.settings.vnc_mode != "off":
-            password_file = self._vnc_password_file()
-            x11vnc = [
-                "x11vnc",
-                "-display",
-                self.settings.display,
-                "-localhost",
-                "-forever",
-                "-shared",
-                "-passwdfile",
-                str(password_file),
-            ]
-            if self.settings.vnc_mode == "view_only":
-                x11vnc.append("-viewonly")
-            self._start_process("x11vnc", x11vnc)
-            self._start_process(
-                "novnc",
-                ["websockify", "--web=/usr/share/novnc/", "6080", "127.0.0.1:5900"],
-            )
+        self.running = True
+
+    def _start_if_acquired(
+        self,
+        acquired: list[str],
+        name: str,
+        command: list[str],
+    ) -> None:
+        existing = self.processes.get(name)
+        try:
+            self._start_process(name, command)
+        except BaseException:
+            current = self.processes.get(name)
+            if current is not None and current is not existing:
+                acquired.append(name)
+            raise
+        current = self.processes.get(name)
+        if current is not None and current is not existing:
+            acquired.append(name)
+
+    async def _rollback_start(self, acquired: list[str]) -> None:
+        first_error: BaseException | None = None
+        for name in reversed(acquired):
+            process = self.processes.get(name)
+            if process is None or process.poll() is not None:
+                continue
+            try:
+                await asyncio.to_thread(_stop_process, process)
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
     async def _wait_for_x_server_ready(self) -> None:
         """Wait until the new X server accepts an authenticated client."""
@@ -124,7 +178,7 @@ class Supervisor:
         env = desktop_process_environment(display=self.settings.display)
         try:
             completed = subprocess.run(  # noqa: S603 - fixed readiness probe.
-                ("xdpyinfo", "-display", self.settings.display),  # noqa: S607
+                desktop_process_command("xdpyinfo", "-display", self.settings.display, environ=env),
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -203,31 +257,40 @@ class Supervisor:
     def stderr(self, name: str, tail: int = 200) -> str:
         return self._tail(self.log_dir / f"{name}.stderr.log", tail)
 
-    def _start_process(self, name: str, command: list[str]) -> None:
+    def _start_process(self, name: str, command: list[str]) -> subprocess.Popen[bytes] | None:
         self.commands[name] = command
         existing = self.processes.get(name)
         if existing is not None and existing.poll() is None:
-            return
+            return existing
         stdout = (self.log_dir / f"{name}.log").open("ab")
         stderr = (self.log_dir / f"{name}.stderr.log").open("ab")
+        # Desktop children receive these descriptors for diagnostics, but the
+        # paths themselves remain service-owned so a compromised app cannot
+        # read daemon output after the process exits.
+        os.fchmod(stdout.fileno(), 0o600)
+        os.fchmod(stderr.fileno(), 0o600)
         env = desktop_process_environment(display=self.settings.display)
-        self.processes[name] = subprocess.Popen(  # noqa: S603
-            command,
+        process = subprocess.Popen(  # noqa: S603
+            desktop_process_command(*command, environ=env),
             stdout=stdout,
             stderr=stderr,
             env=env,
             start_new_session=True,
         )
+        self.processes[name] = process
+        return process
 
     def _vnc_password_file(self) -> Path:
-        secret_dir = self.settings.runtime_dir / ".secrets"
+        secret_dir = Path(
+            os.getenv(VNC_SECRET_DIR_ENV, str(self.settings.runtime_dir / ".secrets"))
+        )
         secret_dir.mkdir(parents=True, exist_ok=True)
-        secret_dir.chmod(0o700)
+        secret_dir.chmod(0o2750 if os.getenv(VNC_SECRET_DIR_ENV) else 0o700)
         password_file = secret_dir / "x11vnc.pass"
         if self.settings.vnc_password is not None or not password_file.exists():
             password = self.settings.vnc_password or secrets.token_urlsafe(24)
             password_file.write_text(password)
-            password_file.chmod(0o600)
+            password_file.chmod(0o640 if os.getenv(VNC_SECRET_DIR_ENV) else 0o600)
         return password_file
 
     @staticmethod

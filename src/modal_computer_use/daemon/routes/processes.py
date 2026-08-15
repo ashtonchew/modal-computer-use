@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
 
+from modal_computer_use.daemon.auth import require_owner_auth
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_idle_only_mutation
 from modal_computer_use.daemon.routes.lifecycle import mutate_display_generation
@@ -21,6 +22,7 @@ async def process_status(name: str, request: Request) -> ProcessStatus:
 
 @router.post("/{name}/restart", responses={404: {"description": "Unknown process"}})
 async def process_restart(name: str, request: Request) -> ProcessStatus:
+    require_owner_auth(request)
     if name not in request.app.state.supervisor.names:
         raise DaemonError(
             "unknown process",

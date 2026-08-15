@@ -678,7 +678,10 @@ def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
     )
 
     args, kwargs = FakeSandbox.experimental_create_calls[0]
-    assert args == ("python", "-m", "modal_computer_use.daemon")
+    assert args[0:2] == ("sh", "-c")
+    assert "COMPUTER_USE_DAEMON_USER" in args[2]
+    assert args[3] == "modal-computer-use-daemon"
+    assert args[4:] == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["image"] == "named-image"
     assert kwargs["cpu"] == 4.0
     assert kwargs["memory"] == 8192

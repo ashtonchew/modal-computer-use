@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Literal
 from urllib.request import urlopen
 
-from modal_computer_use.daemon.process_environment import desktop_process_environment
+from modal_computer_use.daemon.process_environment import (
+    desktop_process_command,
+    desktop_process_environment,
+)
 from modal_computer_use.models import ActionResult, X11Window
 
 BrowserGpuMode = Literal["auto", "off", "chromium-vulkan"]
@@ -196,7 +199,7 @@ def measure_chromium_render_metrics(
     env = desktop_process_environment(display=display)
     started = time.perf_counter()
     process = subprocess.Popen(  # noqa: S603
-        args,
+        desktop_process_command(*args, environ=env),
         env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

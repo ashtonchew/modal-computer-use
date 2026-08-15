@@ -14,7 +14,10 @@ from uuid import uuid4
 
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.errors import DaemonError
-from modal_computer_use.daemon.process_environment import desktop_process_environment
+from modal_computer_use.daemon.process_environment import (
+    desktop_process_command,
+    desktop_process_environment,
+)
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.models import ArtifactInfo, Recording
 from modal_computer_use.redaction import sanitize_text
@@ -76,6 +79,10 @@ class RecordingRegistry:
             ffmpeg_path = shutil.which("ffmpeg")
             if ffmpeg_path is None:
                 raise DaemonError("ffmpeg is not installed", code="recording_start_failed")
+            # Pre-create the target as the daemon so a sticky shared recordings
+            # directory still permits daemon cleanup after desktop ffmpeg exits.
+            path.touch()
+            path.chmod(0o660)
             env = desktop_process_environment(display=self.settings.display)
             command = _ffmpeg_args(
                 ffmpeg_path,
@@ -87,8 +94,11 @@ class RecordingRegistry:
             )
             try:
                 with stderr_path.open("ab") as stderr_handle:
+                    launch_command = desktop_process_command(*command, environ=env)
+                    if launch_command == tuple(command):
+                        launch_command = command
                     self._processes[recording_id] = self._popen_factory(
-                        command,
+                        launch_command,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.DEVNULL,
                         stderr=stderr_handle,
@@ -96,6 +106,8 @@ class RecordingRegistry:
                         start_new_session=True,
                     )
             except OSError as exc:
+                with suppress(OSError):
+                    path.unlink()
                 raise DaemonError(
                     "failed to start ffmpeg recording",
                     code="recording_start_failed",

@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from modal_computer_use.daemon.auth import OWNER_PROOF_HEADER, has_owner_proof
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.leases import lease_credentials_from_headers
 from modal_computer_use.daemon.receipts import (
@@ -16,7 +17,7 @@ from modal_computer_use.daemon.receipts import (
 from modal_computer_use.daemon.routes.leases import _release_all_before_lease_transition
 
 router = APIRouter(include_in_schema=False)
-OWNER_PROOF_HEADER = "x-computer-use-owner-proof"
+__all__ = ["OWNER_PROOF_HEADER"]
 
 
 class _AcknowledgeRequest(BaseModel):
@@ -178,16 +179,7 @@ async def _require_owner_or_current_lease(request: Request) -> None:
 
 
 def _has_owner_proof(request: Request) -> bool:
-    provided = request.headers.get(OWNER_PROOF_HEADER)
-    if not isinstance(provided, str) or not provided:
-        return False
-    settings = request.app.state.settings
-    expected_tokens = (settings.tunnel_token, settings.local_token)
-    matched = False
-    for expected in expected_tokens:
-        if isinstance(expected, str) and expected:
-            matched = secrets.compare_digest(expected, provided) or matched
-    return matched
+    return has_owner_proof(request)
 
 
 def _receipt_access_denied_error(message: str) -> DaemonError:

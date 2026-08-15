@@ -16,6 +16,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
+from .daemon.process_environment import (
+    DAEMON_SERVICE_USER,
+    DESKTOP_USER,
+    SHARED_PROCESS_GROUP,
+    VNC_SECRET_DIR_ENV,
+)
 from .errors import (
     ImageReleaseCanaryError,
     ImageReleaseConflictError,
@@ -48,6 +54,8 @@ DESKTOP_APT_PACKAGES = [
     "x11-xserver-utils",
     "dbus-x11",
     "curl",
+    "sudo",
+    "util-linux",
 ]
 
 BROWSER_APT_PACKAGES = ["firefox-esr", "chromium"]
@@ -409,6 +417,7 @@ def _add_x11_shared_memory_capture(
     image: object,
     *,
     cargo_features: tuple[str, ...] = ("extension-module",),
+    prefix_commands: tuple[str, ...] = (),
 ) -> object:
     """Compile and bake one explicit X11 shared-memory codec artifact.
 
@@ -447,6 +456,7 @@ def _add_x11_shared_memory_capture(
         f"lib{_X11_SHARED_MEMORY_EXTENSION}.so"
     )
     image = image.run_commands(
+        *prefix_commands,
         "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init",
         f"chmod 0755 /tmp/rustup-init && /tmp/rustup-init -y --profile minimal "
         f"--default-toolchain {_RUST_TOOLCHAIN}",
@@ -999,6 +1009,57 @@ def _named_image_recipe(
     )
 
 
+def _credential_boundary_commands() -> tuple[str, ...]:
+    """Create isolated accounts, shared data directories, and a one-way bridge."""
+
+    return (
+        (
+            f"groupadd --system --gid 1900 {DAEMON_SERVICE_USER} && "
+            f"useradd --system --uid 1900 --gid {DAEMON_SERVICE_USER} "
+            f"--home-dir /var/lib/{DAEMON_SERVICE_USER} --create-home "
+            f"--shell /usr/sbin/nologin {DAEMON_SERVICE_USER}"
+        ),
+        (
+            f"groupadd --system --gid 1901 {DESKTOP_USER} && "
+            f"useradd --system --uid 1901 --gid {DESKTOP_USER} "
+            f"--home-dir /home/desktop --create-home --shell /bin/bash {DESKTOP_USER}"
+        ),
+        (
+            f"groupadd --system --gid 1902 {SHARED_PROCESS_GROUP} && "
+            f"usermod --append --groups {SHARED_PROCESS_GROUP} {DAEMON_SERVICE_USER} && "
+            f"usermod --append --groups {SHARED_PROCESS_GROUP} {DESKTOP_USER}"
+        ),
+        f"install -d -m 0755 -o {DESKTOP_USER} -g {DESKTOP_USER} /home/desktop",
+        (
+            f"chmod 0710 /var/lib/{DAEMON_SERVICE_USER} && "
+            f"chgrp {SHARED_PROCESS_GROUP} /var/lib/{DAEMON_SERVICE_USER}"
+        ),
+        (
+            f"install -d -m 3770 -o {DAEMON_SERVICE_USER} -g {SHARED_PROCESS_GROUP} "
+            "/home/desktop/artifacts /home/desktop/recordings"
+        ),
+        (
+            f"install -d -m 0700 -o {DAEMON_SERVICE_USER} -g {DAEMON_SERVICE_USER} "
+            "/home/desktop/artifacts/traces"
+        ),
+        (
+            f"install -d -m 0700 -o {DAEMON_SERVICE_USER} -g {DAEMON_SERVICE_USER} "
+            "/var/lib/computer-daemon/runtime"
+        ),
+        (
+            f"install -d -m 2750 -o {DAEMON_SERVICE_USER} -g {SHARED_PROCESS_GROUP} "
+            "/var/lib/computer-daemon/vnc"
+        ),
+        (
+            "printf '%s\\n' "
+            f"'Defaults:{DAEMON_SERVICE_USER} env_keep += "
+            f"\"DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS\"' "
+            f"'{DAEMON_SERVICE_USER} ALL=({DESKTOP_USER}) NOPASSWD: ALL' "
+            f"> /etc/sudoers.d/{DAEMON_SERVICE_USER}-desktop && "
+            f"chmod 0440 /etc/sudoers.d/{DAEMON_SERVICE_USER}-desktop"
+        ),
+    )
+
 def _image_recipe(definition: _ImageRecipeDefinition) -> object:
     """Build the one shared recipe while preserving explicit policy differences."""
 
@@ -1014,7 +1075,10 @@ def _image_recipe(definition: _ImageRecipeDefinition) -> object:
             uv_version=IMAGE_UV_VERSION,
         )
     )
-    image = _add_x11_shared_memory_capture(image)
+    image = _add_x11_shared_memory_capture(
+        image,
+        prefix_commands=_credential_boundary_commands(),
+    )
     image = image.env(
         {
             "COMPUTER_USE_WINDOW_MANAGER": definition.window_manager,
@@ -1023,6 +1087,10 @@ def _image_recipe(definition: _ImageRecipeDefinition) -> object:
                 definition.browser_prewarm
             ).lower(),
             "COMPUTER_USE_BROWSER": definition.browser or "",
+            "COMPUTER_USE_DAEMON_USER": DAEMON_SERVICE_USER,
+            "COMPUTER_USE_DESKTOP_USER": DESKTOP_USER,
+            VNC_SECRET_DIR_ENV: "/var/lib/computer-daemon/vnc",
+            "COMPUTER_USE_RUNTIME_DIR": "/var/lib/computer-daemon/runtime",
         }
     )
     return image.add_local_python_source(

@@ -21,6 +21,7 @@ from ._version import __version__
 from .borrowed import AsyncBorrowedComputer, BorrowedComputer
 from .client import AsyncDaemonClient, DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
+from .daemon.process_environment import daemon_process_command
 from .errors import (
     BrowserReadinessError,
     ConfigConflictError,
@@ -1656,7 +1657,12 @@ class ComputerSandbox:
         timeout: float = 30.0,
     ) -> ComputerSandbox:
         return cls(
-            DaemonClient(base_url=base_url, token=token, timeout=timeout),
+            DaemonClient(
+                base_url=base_url,
+                token=token,
+                timeout=timeout,
+                _owner_proof=token,
+            ),
             _lifecycle_mode="local",
         )
 
@@ -1770,9 +1776,12 @@ class ComputerSandbox:
         computer: ComputerSandbox | None = None
         try:
             sandbox = modal.Sandbox.create(
-                "python",
-                "-m",
-                "modal_computer_use.daemon",
+                *daemon_process_command(
+                    "python",
+                    "-m",
+                    "modal_computer_use.daemon",
+                    managed_image=not plan.inputs.custom_image_supplied,
+                ),
                 **_materialize_sandbox_create_kwargs(plan),
             )
             config = plan.inputs.config
@@ -1814,6 +1823,7 @@ class ComputerSandbox:
                     token=token,
                     http2=plan.http2,
                     _token_resolver=token_resolver,
+                    _owner_proof=plan.daemon_bearer,
                 ),
                 sandbox=sandbox,
                 metadata=metadata,
@@ -1831,7 +1841,12 @@ class ComputerSandbox:
                     connect_token=connect_token,
                 )
                 computer = cls(
-                    DaemonClient(base_url=base_url, token=token, http2=plan.http2),
+                    DaemonClient(
+                        base_url=base_url,
+                        token=token,
+                        http2=plan.http2,
+                        _owner_proof=plan.daemon_bearer,
+                    ),
                     sandbox=sandbox,
                     metadata=metadata,
                     _lifecycle_mode="owned",
@@ -2889,9 +2904,12 @@ async def _create_async_computer_sandbox(
     startup_timing.mark("sandbox_create_started")
     sandbox = await _allocate_modal_sandbox_async(
         modal.Sandbox.create.aio(
-            "python",
-            "-m",
-            "modal_computer_use.daemon",
+            *daemon_process_command(
+                "python",
+                "-m",
+                "modal_computer_use.daemon",
+                managed_image=not plan.inputs.custom_image_supplied,
+            ),
             **_materialize_sandbox_create_kwargs(plan),
         )
     )
@@ -3379,7 +3397,12 @@ async def _async_daemon_client_for_sandbox(
         if timing is not None:
             timing.mark("connection_parameters_ready")
 
-    client = AsyncDaemonClient(base_url, token=token, http2=http2)
+    client = AsyncDaemonClient(
+        base_url,
+        token=token,
+        http2=http2,
+        _owner_proof=daemon_bearer,
+    )
     try:
         await client.wait_until_ready(timeout=readiness_timeout)
         if timing is not None:
@@ -3401,6 +3424,7 @@ async def _async_daemon_client_for_sandbox(
             await _tunnel_url_async(sandbox, 8080),
             token=attested_token,
             http2=http2,
+            _owner_proof=daemon_bearer,
         )
         try:
             await final_client.wait_until_ready(timeout=readiness_timeout)
@@ -3811,7 +3835,8 @@ def create_modal_benchmark_computer(
     if not config.run_id:
         config.run_id = new_run_id()
     browser_kind = config.browser.kind if config.browser else None
-    if image is None:
+    managed_image = image is None
+    if managed_image:
         image = named_image(
             revision=config.image.revision or "",
             profile=config.resources.profile,
@@ -3877,7 +3902,15 @@ def create_modal_benchmark_computer(
         create = runtime.Sandbox.create
 
     timing.mark("sandbox_create_started")
-    sandbox = create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
+    sandbox = create(
+        *daemon_process_command(
+            "python",
+            "-m",
+            "modal_computer_use.daemon",
+            managed_image=managed_image,
+        ),
+        **create_kwargs,
+    )
     timing.mark("sandbox_registered")
     client: DaemonClient | None = None
     try:
