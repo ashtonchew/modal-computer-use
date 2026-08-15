@@ -57,8 +57,10 @@ The `ComputerStepResult.screenshot` model omits the backend. See
 ## Low-level compatibility
 
 `ComputerSandbox`, `DaemonClient`, `AsyncDaemonClient.local()`, direct REST routes, attach flows,
-idempotency controls, and `screenshots.full_bytes()` remain supported for local control, direct
-daemon access, debugging, and compatibility. These primitives do not create or verify the placed
+ordinary action-batch idempotency controls, and `screenshots.full_bytes()` remain supported for
+local control, direct daemon access, debugging, and compatibility. Raw action-to-screenshot
+responses are intentionally not idempotent because their complete binary result is not retained.
+These primitives do not create or verify the placed
 owner-to-Function topology. Missing placement or handoff prerequisites never cause an automatic
 fallback to an external caller.
 
@@ -519,9 +521,10 @@ limit. Timeout precedence is `action.timeout_ms`, then request `max_action_timeo
 daemon default; `screenshot_after` uses request `max_action_timeout_ms`, then daemon default.
 Values above the configured daemon maximum are rejected. The whole-batch duration limit is a
 hard deadline and stops the batch even when `continue_on_error` is true. Timeout results include
-`error_code="timeout"` and an output `scope` of `action` or `batch`. `Idempotency-Key` replays
-the original complete batch result without re-executing actions, incrementing budgets, or
-duplicating trace/artifact writes; reusing a key with a different request body returns `409`.
+`error_code="timeout"` and an output `scope` of `action` or `batch`. On `/v1/actions/run`,
+`Idempotency-Key` replays the original complete batch result without re-executing actions,
+incrementing budgets, or duplicating trace/artifact writes; reusing a key with a different request
+body returns `409`. Raw action-to-screenshot routes reject idempotency keys before dispatch.
 `continue_on_error` applies between top-level batch items. A `hold_key` action is treated as one
 compound top-level item: nested actions run while the key is held, and the first nested failure
 releases the key and fails that `hold_key` item before later nested actions run.

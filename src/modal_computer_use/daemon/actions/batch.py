@@ -23,7 +23,10 @@ from modal_computer_use.daemon.receipts import (
     prepare_mutation_receipt,
     require_new_receipt,
 )
-from modal_computer_use.daemon.routes.validation import backend_readiness, mark_desktop_ready
+from modal_computer_use.daemon.routes.validation import (
+    ensure_desktop_ready_state,
+    mark_desktop_ready,
+)
 from modal_computer_use.errors import BudgetExceededError
 from modal_computer_use.models import (
     ActionBatchRequest,
@@ -100,18 +103,7 @@ class ActionBatchContext:
 
 
 async def _ensure_desktop_ready(context: ActionBatchContext, *, force: bool = False) -> None:
-    ready, errors = await backend_readiness(context.state, force=force)
-    if not context.state.supervisor.running:
-        ready = False
-        errors = ["desktop supervisor is stopped", *errors]
-    if ready:
-        return
-    raise DaemonError(
-        "desktop is not ready",
-        status_code=503,
-        code="desktop_not_ready",
-        details={"errors": errors},
-    )
+    await ensure_desktop_ready_state(context.state, force=force)
 
 
 async def validate(payload: ActionBatchRequest, context: ActionBatchContext) -> ValidationResult:
@@ -145,10 +137,11 @@ async def run_with_screenshot_bytes(
             status_code=422,
             code="missing_screenshot_after",
         )
+    reject_raw_screenshot_idempotency(payload, idempotency_key)
     return await _run(
         payload,
         context,
-        idempotency_key=idempotency_key,
+        idempotency_key=None,
         raw_screenshot_after=True,
     )
 
@@ -849,6 +842,19 @@ def _effective_idempotency_key(payload: ActionBatchRequest, header_key: str | No
             code="idempotency_key_conflict",
         )
     return header_key or payload.idempotency_key
+
+
+def reject_raw_screenshot_idempotency(
+    payload: ActionBatchRequest,
+    header_key: str | None,
+) -> None:
+    if _effective_idempotency_key(payload, header_key) is None:
+        return
+    raise DaemonError(
+        "raw screenshot action batches do not support idempotency keys",
+        status_code=422,
+        code="raw_screenshot_idempotency_not_supported",
+    )
 
 
 def _request_fingerprint(payload: ActionBatchRequest) -> str:

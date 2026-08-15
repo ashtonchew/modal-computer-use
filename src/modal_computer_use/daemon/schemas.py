@@ -28,6 +28,14 @@ class Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DaemonErrorResponse(Schema):
+    """Structured error envelope emitted by every daemon validation/failure path."""
+
+    code: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class ObservationActionCaptureRequest(ActionBatchRequest):
     capture_delay_ms: int = Field(default=0, ge=0, le=60_000)
 

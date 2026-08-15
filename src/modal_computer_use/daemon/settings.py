@@ -274,6 +274,34 @@ class DaemonSettings:
         _require_range("COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS", self.tunnel_token_ttl_seconds, 1)
         _require_range("COMPUTER_USE_MAX_TUNNEL_SESSIONS", self.max_tunnel_sessions, 0)
         _require_range("COMPUTER_USE_MAX_BATCH_ACTIONS", self.max_batch_actions, 1, 500)
+        _require_range(
+            "COMPUTER_USE_POST_ACTION_DELAY_MS",
+            self.post_action_delay_ms,
+            0,
+            10_000,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_BATCH_DURATION_MS",
+            self.max_batch_duration_ms,
+            1,
+            600_000,
+        )
+        _require_range(
+            "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS",
+            self.default_action_timeout_ms,
+            1,
+            300_000,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS",
+            self.max_action_timeout_ms,
+            1,
+            600_000,
+        )
+        if self.default_action_timeout_ms > self.max_action_timeout_ms:
+            raise ValueError(
+                "default_action_timeout_ms must not exceed max_action_timeout_ms"
+            )
         _require_range("COMPUTER_USE_MAX_ACTION_DEPTH", self.max_action_depth, 1, 128)
         _require_range("COMPUTER_USE_MAX_JSON_BODY_BYTES", self.max_json_body_bytes, 0)
         _require_range(

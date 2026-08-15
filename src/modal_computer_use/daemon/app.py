@@ -30,6 +30,7 @@ from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.input_rate_limit import InputTokenBucket
 from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
+from modal_computer_use.daemon.openapi import openapi_schema
 from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.receipts import ReceiptJournal
 from modal_computer_use.daemon.request_limits import (
@@ -439,6 +440,8 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         recordings.dashboard_router,
     ):
         app.include_router(router)
+
+    app.openapi = lambda: openapi_schema(app)
     return app
 
 

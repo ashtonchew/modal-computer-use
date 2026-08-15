@@ -99,22 +99,32 @@ async def http_observe_change_scope(request: Request) -> AsyncIterator[None]:
         state.active_http_observe_changes = max(state.active_http_observe_changes - 1, 0)
 
 
-async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
-    if getattr(request.app.state, "display_restart_in_progress", False) and not force:
+async def desktop_readiness_state(state: Any, *, force: bool = False) -> tuple[bool, list[str]]:
+    """Return the canonical readiness proof for one daemon state object.
+
+    Routes and shared action transports must consult the same lifecycle gates.  Keeping the
+    implementation state-based avoids a second, subtly different readiness check for action
+    batches that do not have a ``Request`` object.
+    """
+    if getattr(state, "display_restart_in_progress", False) and not force:
         return False, ["display lifecycle mutation is in progress"]
-    if getattr(request.app.state, "display_reconstruction_failed", False):
+    if getattr(state, "display_reconstruction_failed", False):
         return False, ["display lifecycle reconstruction failed"]
-    supervisor = request.app.state.supervisor
+    supervisor = state.supervisor
     if not supervisor.running:
-        invalidate_desktop_readiness(request.app.state)
+        invalidate_desktop_readiness(state)
         return False, ["desktop supervisor is stopped"]
     if "xvfb" in supervisor.names:
         xvfb_status = supervisor.status("xvfb")
         if xvfb_status.status not in ("running", "unknown"):
-            invalidate_desktop_readiness(request.app.state)
+            invalidate_desktop_readiness(state)
             return False, ["xvfb is not running"]
-    ready, errors = await backend_readiness(request.app.state, force=force)
+    ready, errors = await backend_readiness(state, force=force)
     return ready, errors
+
+
+async def desktop_readiness(request: Request, *, force: bool = False) -> tuple[bool, list[str]]:
+    return await desktop_readiness_state(request.app.state, force=force)
 
 
 async def daemon_readiness(
@@ -136,6 +146,18 @@ async def daemon_readiness(
 
 async def ensure_desktop_ready(request: Request, *, force: bool = False) -> None:
     ready, errors = await desktop_readiness(request, force=force)
+    if ready:
+        return
+    raise DaemonError(
+        "desktop is not ready",
+        status_code=503,
+        code="desktop_not_ready",
+        details={"errors": errors},
+    )
+
+
+async def ensure_desktop_ready_state(state: Any, *, force: bool = False) -> None:
+    ready, errors = await desktop_readiness_state(state, force=force)
     if ready:
         return
     raise DaemonError(
@@ -347,5 +369,9 @@ def map_e2big(exc: BaseException) -> DaemonError | None:
         "command exceeds the platform execution limit",
         status_code=422,
         code="command_too_large",
-        details={"errno": "E2BIG"},
+        details={
+            "errno": "E2BIG",
+            "retry_safe": True,
+            "emission_state": "not_started",
+        },
     )

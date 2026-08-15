@@ -50,7 +50,13 @@ async def open_artifact(payload: OpenArtifactRequest, request: Request) -> Actio
         raise FileNotFoundError(payload.path)
 
     async def operation() -> ActionResult:
-        result = await request.app.state.backend.launch("xdg-open", [str(path)])
+        try:
+            result = await request.app.state.backend.launch("xdg-open", [str(path)])
+        except OSError as exc:
+            mapped = map_e2big(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise
         body = sanitize_payload(result.model_dump(mode="json"))
         if isinstance(body, dict) and isinstance(body.get("output"), dict):
             body["output"].pop("args", None)
