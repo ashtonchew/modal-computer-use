@@ -288,6 +288,8 @@ def test_daemon_process_command_uses_setpriv_without_secret_argv(monkeypatch) ->
 
     assert command[:2] == ("sh", "-c")
     assert "COMPUTER_USE_DAEMON_USER" in command[2]
+    assert "credential boundary is unavailable" in command[2]
+    assert "exit 78" in command[2]
     assert command[3] == "modal-computer-use-daemon"
     assert "bootstrap-secret" not in command
     assert daemon_process_command("python", "-m", "daemon") == ("python", "-m", "daemon")

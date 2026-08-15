@@ -72,10 +72,9 @@ def daemon_process_command(
     """Build a daemon launcher whose UID decision runs inside the Image.
 
     ``managed_image`` is selected by the SDK from the image source, not from
-    caller environment values. The shell trampoline then evaluates the baked
-    image marker in-container, preserving compatibility with older managed
-    releases that predate the dedicated accounts while never resolving those
-    accounts on the caller machine.
+    caller environment values. The shell trampoline evaluates the baked image
+    marker in-container and fails closed when a managed release predates the
+    credential boundary. Account resolution never occurs on the caller machine.
     """
 
     if not args:
@@ -89,7 +88,7 @@ def daemon_process_command(
         'if [ -n "$COMPUTER_USE_DAEMON_USER" ]; then '
         'exec setpriv --reuid="$COMPUTER_USE_DAEMON_USER" '
         '--regid="$COMPUTER_USE_DAEMON_USER" --init-groups -- "$@"; '
-        'else exec "$@"; fi'
+        "else echo 'managed image credential boundary is unavailable' >&2; exit 78; fi"
     )
     return (
         "sh",
