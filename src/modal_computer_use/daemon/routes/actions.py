@@ -12,7 +12,11 @@ from typing import Any
 from fastapi import APIRouter, Header, Request, Response
 from PIL import Image
 
-from modal_computer_use.daemon.actions import ActionBatchContext, run_with_screenshot_bytes
+from modal_computer_use.daemon.actions import (
+    ActionBatchContext,
+    reject_raw_screenshot_idempotency,
+    run_with_screenshot_bytes,
+)
 from modal_computer_use.daemon.actions import run as run_batch
 from modal_computer_use.daemon.actions import validate as validate_batch
 from modal_computer_use.daemon.desktop.screenshots import (
@@ -30,6 +34,7 @@ from modal_computer_use.daemon.desktop.xdamage import (
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import run_screenshot_capture
 from modal_computer_use.daemon.routes.screenshots import (
+    _RAW_SCREENSHOT_RESPONSE,
     _screenshot_headers,
     enforce_screenshot_options_pixels,
 )
@@ -50,6 +55,25 @@ from modal_computer_use.models import (
 )
 
 router = APIRouter(prefix="/v1/actions")
+
+_ACTION_RAW_SCREENSHOT_RESPONSE = {
+    **_RAW_SCREENSHOT_RESPONSE,
+    "headers": {
+        **_RAW_SCREENSHOT_RESPONSE["headers"],
+        "x-computer-use-action-result": {"required": True, "schema": {"type": "string"}},
+    },
+}
+_OBSERVE_CHANGE_RAW_SCREENSHOT_RESPONSE = {
+    **_ACTION_RAW_SCREENSHOT_RESPONSE,
+    "headers": {
+        **_ACTION_RAW_SCREENSHOT_RESPONSE["headers"],
+        "x-computer-use-change-result": {"required": True, "schema": {"type": "string"}},
+        "x-computer-use-change-timing-ms": {
+            "required": True,
+            "schema": {"type": "string"},
+        },
+    },
+}
 
 
 def _prepare_change_signal(
@@ -93,17 +117,16 @@ async def run(
 
 @router.post(
     "/run/raw-screenshot",
-    responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
+    responses={200: _ACTION_RAW_SCREENSHOT_RESPONSE},
 )
 async def run_raw_screenshot(
     payload: ActionBatchRequest,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Response:
+    reject_raw_screenshot_idempotency(payload, request.headers.get("Idempotency-Key"))
     result, shot = await run_with_screenshot_bytes(
         payload,
         ActionBatchContext(request.app.state, request.headers),
-        idempotency_key=idempotency_key,
     )
     if shot is None:
         raise DaemonError(
@@ -135,25 +158,23 @@ async def run_raw_screenshot(
         "polling remains the fallback. This result does not establish application readiness, "
         "visual stability, or task completion."
     ),
-    responses={200: {"content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}}}},
+    responses={200: _OBSERVE_CHANGE_RAW_SCREENSHOT_RESPONSE},
 )
 async def run_observe_change_raw_screenshot(
     payload: ActionObserveChangeScreenshotRequest,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Response:
+    reject_raw_screenshot_idempotency(payload, request.headers.get("Idempotency-Key"))
     async with http_observe_change_scope(request):
         return await _run_observe_change_raw_screenshot(
             payload,
             request,
-            idempotency_key=idempotency_key,
         )
 
 
 async def _run_observe_change_raw_screenshot(
     payload: ActionObserveChangeScreenshotRequest,
     request: Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> Response:
     started = perf_counter()
     options = payload.screenshot_options
@@ -202,7 +223,7 @@ async def _run_observe_change_raw_screenshot(
         action_result = await run_batch(
             action_request,
             ActionBatchContext(request.app.state, request.headers),
-            idempotency_key=idempotency_key,
+            idempotency_key=None,
         )
         action_wall_ms = _elapsed_ms(action_started)
         capture_delay_wall_ms = 0.0

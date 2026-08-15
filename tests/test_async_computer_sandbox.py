@@ -250,6 +250,77 @@ class _FakeModalRuntime:
             yield sandbox
 
 
+@pytest.mark.asyncio
+async def test_async_owner_recovery_uses_private_owner_proof_and_attached_fails_closed() -> None:
+    calls: list[tuple[str, str, dict[str, object]]] = []
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    async def request(method: str, path: str, **kwargs: object) -> _Response:
+        calls.append((method, path, dict(kwargs)))
+        if method == "GET":
+            return _Response({"recovery_required": False, "classification": None})
+        return _Response({"recovery_required": False, "acknowledged": True})
+
+    owner = object.__new__(AsyncComputerSandbox)
+    owner._daemon_bearer = "owner-proof"
+    owner._lifecycle_mode = "owned"
+    owner.client = SimpleNamespace(transport=SimpleNamespace(request=request))
+
+    status = await owner.recovery_status()
+    acknowledgement = await owner.acknowledge_recovery(incident_id="incident-1")
+
+    assert status.recovery_required is False
+    assert acknowledgement.acknowledged is True
+    assert calls == [
+        (
+            "GET",
+            "/v1/recovery/status",
+            {"headers": {"x-computer-use-owner-proof": "owner-proof"}},
+        ),
+        (
+            "POST",
+            "/v1/recovery/acknowledge",
+            {
+                "json": {"incident_id": "incident-1"},
+                "headers": {"x-computer-use-owner-proof": "owner-proof"},
+            },
+        ),
+    ]
+
+    attached = object.__new__(AsyncComputerSandbox)
+    attached._daemon_bearer = None
+    attached._lifecycle_mode = "attached"
+    with pytest.raises(SandboxUnavailableError, match="owner recovery"):
+        await attached.recovery_status()
+    with pytest.raises(SandboxUnavailableError, match="owner recovery"):
+        await attached.acknowledge_recovery(incident_id="incident-1")
+
+
+@pytest.mark.asyncio
+async def test_async_debug_urls_reads_modal_vnc_tunnel_without_daemon_fallback() -> None:
+    async def tunnels() -> dict[int, object]:
+        return {6080: SimpleNamespace(url="https://novnc.invalid")}
+
+    computer = object.__new__(AsyncComputerSandbox)
+    computer._sandbox = SimpleNamespace(tunnels=SimpleNamespace(aio=tunnels))
+    urls = await computer.debug_urls()
+    assert urls.vnc == "https://novnc.invalid"
+    assert urls.daemon is None
+
+    async def unavailable() -> object:
+        raise RuntimeError("tunnel lookup failed")
+
+    computer._sandbox = SimpleNamespace(tunnels=SimpleNamespace(aio=unavailable))
+    urls = await computer.debug_urls()
+    assert urls.vnc is None
+
+
 def _install_runtime(monkeypatch: pytest.MonkeyPatch) -> _FakeModalRuntime:
     runtime = _FakeModalRuntime()
     monkeypatch.setitem(sys.modules, "modal", runtime)
@@ -828,6 +899,9 @@ async def test_create_is_lazy_native_async_ready_on_entry_and_owns_cleanup(
     assert runtime.calls == []
     async with context as computer:
         assert computer.client.base_url == "https://connect.invalid"
+        create_environment = runtime.create_kwargs[0]["env"]
+        assert isinstance(create_environment, dict)
+        assert computer._daemon_bearer == create_environment["COMPUTER_USE_TUNNEL_TOKEN"]
         assert readiness_calls == ["https://connect.invalid"]
         assert runtime.created.terminate_calls == []
 
@@ -894,6 +968,7 @@ async def test_attach_is_lazy_ready_on_entry_and_never_terminates_remote_owner(
     assert runtime.calls == []
     async with context as computer:
         assert computer.client.base_url == "https://connect.invalid"
+        assert computer._daemon_bearer is None
         assert readiness_calls == ["https://connect.invalid"]
 
     assert runtime.by_id.terminate_calls == []

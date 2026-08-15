@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
@@ -18,7 +19,7 @@ from modal_computer_use.models import Region, Screenshot, ScreenshotOptions
 
 router = APIRouter(prefix="/v1/screenshots")
 
-_RAW_SCREENSHOT_RESPONSE = {
+_RAW_SCREENSHOT_RESPONSE: dict[str, Any] = {
     "content": {"image/png": {}, "image/jpeg": {}, "image/webp": {}},
     "headers": {
         "x-computer-use-width": {

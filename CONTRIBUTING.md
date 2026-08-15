@@ -79,6 +79,10 @@ uv run mypy src
 uv run pytest
 ```
 
+This default pytest invocation skips credentialed `@pytest.mark.modal` smoke tests. Run those only
+from a protected environment with `MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1` and the per-surface
+authorization variables from the release checklist; credentials alone never enable billable tests.
+
 Run Modal tests only when the change needs them and you have suitable credentials. Modal tests can
 create billable resources.
 

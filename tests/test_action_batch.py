@@ -689,7 +689,7 @@ def test_action_batch_observe_change_capture_error_is_limited_to_one_request(
     payload = {
         "actions": [{"type": "move", "x": 10, "y": 20}],
         "previous_source_sha256": before.sha256,
-        "change_timeout_ms": 25,
+        "change_timeout_ms": 1_000,
         "poll_interval_ms": 1,
         "change_signal": "poll",
     }

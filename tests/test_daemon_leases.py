@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import Any
 
@@ -21,6 +22,7 @@ from modal_computer_use.daemon.leases import (
 )
 from modal_computer_use.daemon.receipts import OPERATION_SEQUENCE_HEADER
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.models import ActionResult
 
 
 class _Clock:
@@ -232,6 +234,52 @@ def test_lease_heartbeat_release_and_stale_delayed_fence(test_client) -> None:
         headers=second_headers,
     )
     assert current.status_code == 200
+
+
+def test_release_cleans_backend_before_lease_becomes_acquirable(test_client, app) -> None:
+    acquired = _acquire(test_client, "cleanup-release")
+    headers = _lease_headers(acquired)
+    app.state.backend.held_keys.add("A")
+    app.state.backend.held_buttons.add("left")
+    observed: list[str] = []
+    original_release_all = app.state.backend.release_all
+
+    async def release_all() -> ActionResult:
+        observed.append(app.state.lease_coordinator.status()["state"])
+        return await original_release_all()
+
+    app.state.backend.release_all = release_all
+    released = test_client.post("/v1/leases/release", headers=headers)
+
+    assert released.status_code == 200
+    assert observed == ["active"]
+    assert app.state.backend.held_keys == set()
+    assert app.state.backend.held_buttons == set()
+    assert _acquire(test_client, "cleanup-release-next").status_code == 200
+
+
+def test_release_cleanup_failure_quarantines_before_new_lease(test_client, app) -> None:
+    acquired = _acquire(test_client, "cleanup-failure")
+    headers = _lease_headers(acquired)
+
+    async def release_all() -> ActionResult:
+        return ActionResult(
+            ok=False,
+            message="held input remains",
+            output={"code": "release_all_incomplete", "remaining": {"keys": ["A"]}},
+        )
+
+    app.state.backend.release_all = release_all
+    released = test_client.post("/v1/leases/release", headers=headers)
+    recovery = test_client.get("/v1/recovery/status", headers={"x-computer-use-owner-proof": "dev"})
+    next_lease = _acquire(test_client, "cleanup-failure-next")
+
+    assert released.status_code == 400
+    assert released.json()["code"] == "release_all_incomplete"
+    assert recovery.status_code == 200
+    assert recovery.json()["recovery_required"] is True
+    assert next_lease.status_code == 409
+    assert next_lease.json()["code"] == "recovery_required"
 
 
 def test_acquire_run_id_is_not_taken_from_daemon_settings(tmp_path) -> None:
@@ -485,6 +533,179 @@ def test_idle_expiration_seals_run_interrupted_and_releases_ownership(tmp_path) 
     assert status.json()["state"] == "expired"
     assert status.json()["run_state"] == "interrupted"
     assert legacy.status_code == 200
+
+
+def test_ttl_expiry_cleans_backend_before_next_lease(tmp_path) -> None:
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+        )
+    )
+    app.state.lease_coordinator = LeaseCoordinator(ttl_seconds=0.02)
+    app.state.backend.held_keys.add("A")
+    app.state.backend.held_buttons.add("left")
+    calls = 0
+    original_release_all = app.state.backend.release_all
+
+    async def release_all() -> ActionResult:
+        nonlocal calls
+        calls += 1
+        return await original_release_all()
+
+    app.state.backend.release_all = release_all
+    with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
+        acquired = _acquire(client, "cleanup-expiry")
+        time.sleep(0.08)
+        status = client.get("/v1/leases/status")
+        next_lease = _acquire(client, "cleanup-expiry-next")
+
+    assert acquired.status_code == 200
+    assert status.json()["state"] == "expired"
+    assert calls == 1
+    assert app.state.backend.held_keys == set()
+    assert app.state.backend.held_buttons == set()
+    assert next_lease.status_code == 200
+
+
+def test_owner_recovery_cleans_backend_before_reset(test_client, app) -> None:
+    acquired = _acquire(test_client, "cleanup-recovery")
+    lease_headers = {
+        **_lease_headers(acquired),
+        OPERATION_SEQUENCE_HEADER: "0",
+    }
+
+    async def indeterminate_move(_x: int, _y: int) -> ActionResult:
+        return ActionResult(
+            ok=False,
+            message="input outcome unknown",
+            output={"code": "input_may_be_partial", "indeterminate": True},
+        )
+
+    app.state.backend.mouse_move = indeterminate_move
+    partial = test_client.post(
+        "/v1/mouse/move",
+        json={"x": 1, "y": 2},
+        headers=lease_headers,
+    )
+    incident_id = partial.json()["details"]["incident_id"]
+    app.state.backend.held_keys.add("A")
+    observed: list[str] = []
+    original_release_all = app.state.backend.release_all
+
+    async def release_all() -> ActionResult:
+        observed.append(app.state.lease_coordinator.status()["state"])
+        return await original_release_all()
+
+    app.state.backend.release_all = release_all
+    acknowledged = test_client.post(
+        "/v1/recovery/acknowledge",
+        json={"incident_id": incident_id},
+        headers={"x-computer-use-owner-proof": "dev"},
+    )
+
+    assert partial.status_code == 409
+    assert acknowledged.status_code == 200
+    assert observed == ["active"]
+    assert app.state.backend.held_keys == set()
+
+
+def test_acquire_observing_expiry_cleans_backend_before_grant(tmp_path) -> None:
+    clock = _Clock()
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+        )
+    )
+    app.state.lease_coordinator = LeaseCoordinator(clock=clock, ttl_seconds=1)
+    app.state.backend.held_keys.add("A")
+    calls: list[str] = []
+    original_release_all = app.state.backend.release_all
+
+    async def release_all() -> ActionResult:
+        calls.append(app.state.lease_coordinator.status()["state"])
+        return await original_release_all()
+
+    app.state.backend.release_all = release_all
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                first = await client.post("/v1/leases/acquire", json={"run_id": "expired"})
+                expiry_task = app.state.lease_expiry_task
+                assert expiry_task is not None
+                expiry_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await expiry_task
+                clock.advance(2)
+                second = await client.post(
+                    "/v1/leases/acquire", json={"run_id": "after-expiry"}
+                )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+    asyncio.run(exercise())
+    assert calls == ["expired"]
+    assert app.state.backend.held_keys == set()
+
+
+def test_status_observing_expiry_cleans_backend_before_sealing(tmp_path) -> None:
+    clock = _Clock()
+    app = create_app(
+        DaemonSettings(
+            backend="mock",
+            artifacts_dir=tmp_path / "artifacts",
+            recordings_dir=tmp_path / "recordings",
+            runtime_dir=tmp_path / "runtime",
+            local_token="dev",
+        )
+    )
+    app.state.lease_coordinator = LeaseCoordinator(clock=clock, ttl_seconds=1)
+    calls: list[str] = []
+    original_release_all = app.state.backend.release_all
+
+    async def release_all() -> ActionResult:
+        calls.append(app.state.lease_coordinator.status()["state"])
+        return await original_release_all()
+
+    app.state.backend.release_all = release_all
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                first = await client.post("/v1/leases/acquire", json={"run_id": "expired"})
+                expiry_task = app.state.lease_expiry_task
+                assert expiry_task is not None
+                expiry_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await expiry_task
+                clock.advance(2)
+                status = await client.get("/v1/leases/status")
+
+        assert first.status_code == 200
+        assert status.status_code == 200
+        assert status.json()["state"] == "expired"
+
+    asyncio.run(exercise())
+    assert calls == ["expired"]
 
 
 def test_heartbeat_renews_while_admitted_mutation_exceeds_ttl(tmp_path) -> None:

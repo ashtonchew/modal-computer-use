@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
 import pytest
+
+if importlib.util.find_spec("modal") is None:
+    pytest.skip("Modal benchmark runner requires the optional modal extra", allow_module_level=True)
 
 from modal_computer_use.benchmarks.full_screenshot_sdk_harness import build_paired_schedule
 from scripts.benchmarks import x11_shm_stock_zlib_vertical_slice as runner

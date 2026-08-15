@@ -6,6 +6,7 @@ from time import monotonic
 
 from fastapi import APIRouter, Request
 
+from modal_computer_use.daemon.auth import require_owner_auth
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import budget_policy, run_idle_only_mutation
 from modal_computer_use.daemon.routes.validation import (
@@ -174,6 +175,8 @@ async def status(request: Request) -> ComputerStatus:
 
 @router.post("/start")
 async def start(request: Request) -> LifecycleResult:
+    require_owner_auth(request)
+
     async def operation() -> LifecycleResult:
         await mutate_display_generation(
             request,
@@ -187,6 +190,8 @@ async def start(request: Request) -> LifecycleResult:
 
 @router.post("/stop")
 async def stop(request: Request) -> LifecycleResult:
+    require_owner_auth(request)
+
     async def operation() -> LifecycleResult:
         await mutate_display_generation(
             request,
@@ -200,6 +205,8 @@ async def stop(request: Request) -> LifecycleResult:
 
 @router.post("/restart")
 async def restart(request: Request) -> LifecycleResult:
+    require_owner_auth(request)
+
     async def operation() -> LifecycleResult:
         await mutate_display_generation(
             request,

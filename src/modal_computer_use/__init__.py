@@ -1,115 +1,249 @@
+"""Public package exports.
+
+Keep package initialization inexpensive: orchestration modules are loaded only
+when one of their public names is actually requested.  The lazy map below
+preserves the historical root-level API while avoiding eager orchestration
+imports in daemon processes.
+"""
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
 from ._version import __version__
-from .borrowed import AsyncBorrowedComputer, BorrowedComputer
-from .client import AsyncDaemonClient, DaemonClient
-from .config import (
-    ActionConfig,
-    BrowserConfig,
-    BudgetConfig,
-    ComputerConfig,
-    DesktopConfig,
-    ImageConfig,
-    NetworkConfig,
-    ResourceConfig,
-    RuntimeConfig,
-    StorageConfig,
-)
-from .errors import (
-    ActionOutcomeUnknownError,
-    BrowserReadinessError,
-    ConfigConflictError,
-    FrameValidationError,
-    ImageReleaseCanaryError,
-    ImageReleaseConflictError,
-    ImageReleaseError,
-    ImageReleaseIdentityMismatchError,
-    ImageReleaseLockError,
-    ImageReleaseManifestError,
-    ImageReleaseNotFoundError,
-    OperationNotAppliedError,
-    OperationResultUnavailableError,
-    RunSequenceConflictError,
-    SandboxAmbiguousError,
-    SandboxUnavailableError,
-    SessionBorrowError,
-    SessionBusyError,
-    SessionCompatibilityError,
-    SessionDaemonProtocolError,
-    SessionEnvironmentMismatchError,
-    SessionLeaseLostError,
-    SessionPlacementMalformedError,
-    SessionPlacementMismatchError,
-    SessionPlacementMissingError,
-    SessionPlacementUnverifiableError,
-    SessionRecoveryRequiredError,
-    SessionTargetMismatchError,
-)
-from .hot_session import AsyncHotSessionClient, HotSessionClient
-from .image import (
-    ImageCanaryRecord,
-    ImageReleaseRecord,
-    ImageReleaseSpec,
-    load_image_release_record,
-    publish_image_release,
-    resolve_release_image,
-)
-from .latency import (
-    SessionStartupTiming,
-    WarmPoolClaim,
-    WarmPoolClaimMetrics,
-    WarmPoolEntry,
-    WarmPoolFillResult,
-    WarmPoolPolicy,
-    WarmPoolReconcileResult,
-    estimate_pool_idle_cost,
-    estimate_warm_idle_cost,
-    pool_config_identity,
-    validate_first_frame,
-)
-from .manager import ComputerSandboxManager
-from .models import (
-    ActionBatchResult,
-    ActionBatchTiming,
-    ActionDecision,
-    ActionItemResult,
-    ActionResult,
-    ArtifactInfo,
-    ArtifactSyncResult,
-    ComputerAction,
-    ComputerSessionHandle,
-    ComputerStatus,
-    CoordinateSpace,
-    DebugUrls,
-    DisplayGeometry,
-    DisplayInfo,
-    Point,
-    ProcessStatus,
-    Recording,
-    Region,
-    SandboxCleanupItem,
-    SandboxCleanupResult,
-    SandboxRef,
-    Screenshot,
-    ScreenshotOptions,
-    SessionRecoveryAcknowledgement,
-    SessionRecoveryStatus,
-    X11Window,
-)
-from .observations import ActionObservationResult, AsyncObservationClient, ObservationClient
-from .registry import SandboxRegistry
-from .sandbox import (
-    AsyncComputerSandbox,
-    ComputerSandbox,
-    ModalDaemonCommandResult,
-    ModalDaemonEndpoint,
-    ModalDaemonEndpointPath,
-    ModalSandboxExecResult,
-    ModalVolumeMount,
-    modal_daemon_endpoint,
-    modal_daemon_env,
-    run_modal_daemon_command,
-    run_modal_daemon_command_with_fallback,
-)
-from .steps import ComputerStepResult, ComputerStepTiming
+
+if TYPE_CHECKING:
+    from .borrowed import AsyncBorrowedComputer, BorrowedComputer
+    from .client import AsyncDaemonClient, DaemonClient
+    from .config import (
+        ActionConfig,
+        BrowserConfig,
+        BudgetConfig,
+        ComputerConfig,
+        DesktopConfig,
+        ImageConfig,
+        NetworkConfig,
+        ResourceConfig,
+        RuntimeConfig,
+        StorageConfig,
+    )
+    from .errors import (
+        ActionOutcomeUnknownError,
+        BrowserReadinessError,
+        ConfigConflictError,
+        FrameValidationError,
+        ImageReleaseCanaryError,
+        ImageReleaseConflictError,
+        ImageReleaseError,
+        ImageReleaseIdentityMismatchError,
+        ImageReleaseLockError,
+        ImageReleaseManifestError,
+        ImageReleaseNotFoundError,
+        OperationNotAppliedError,
+        OperationResultUnavailableError,
+        RunSequenceConflictError,
+        SandboxAmbiguousError,
+        SandboxUnavailableError,
+        SessionBorrowError,
+        SessionBusyError,
+        SessionCompatibilityError,
+        SessionDaemonProtocolError,
+        SessionEnvironmentMismatchError,
+        SessionLeaseLostError,
+        SessionPlacementMalformedError,
+        SessionPlacementMismatchError,
+        SessionPlacementMissingError,
+        SessionPlacementUnverifiableError,
+        SessionRecoveryRequiredError,
+        SessionTargetMismatchError,
+    )
+    from .hot_session import AsyncHotSessionClient, HotSessionClient
+    from .image import (
+        ImageCanaryRecord,
+        ImageReleaseRecord,
+        ImageReleaseSpec,
+        load_image_release_record,
+        publish_image_release,
+        resolve_release_image,
+    )
+    from .latency import (
+        SessionStartupTiming,
+        WarmPoolClaim,
+        WarmPoolClaimMetrics,
+        WarmPoolEntry,
+        WarmPoolFillResult,
+        WarmPoolPolicy,
+        WarmPoolReconcileResult,
+        estimate_pool_idle_cost,
+        estimate_warm_idle_cost,
+        pool_config_identity,
+        validate_first_frame,
+    )
+    from .manager import ComputerSandboxManager
+    from .models import (
+        ActionBatchResult,
+        ActionBatchTiming,
+        ActionDecision,
+        ActionItemResult,
+        ActionResult,
+        ArtifactInfo,
+        ArtifactSyncResult,
+        ComputerAction,
+        ComputerSessionHandle,
+        ComputerStatus,
+        CoordinateSpace,
+        DebugUrls,
+        DisplayGeometry,
+        DisplayInfo,
+        Point,
+        ProcessStatus,
+        Recording,
+        Region,
+        SandboxCleanupItem,
+        SandboxCleanupResult,
+        SandboxRef,
+        Screenshot,
+        ScreenshotOptions,
+        SessionRecoveryAcknowledgement,
+        SessionRecoveryStatus,
+        X11Window,
+    )
+    from .observations import ActionObservationResult, AsyncObservationClient, ObservationClient
+    from .registry import SandboxRegistry
+    from .sandbox import (
+        AsyncComputerSandbox,
+        ComputerSandbox,
+        ModalDaemonCommandResult,
+        ModalDaemonEndpoint,
+        ModalDaemonEndpointPath,
+        ModalSandboxExecResult,
+        ModalVolumeMount,
+        modal_daemon_endpoint,
+        modal_daemon_env,
+        run_modal_daemon_command,
+        run_modal_daemon_command_with_fallback,
+    )
+    from .steps import ComputerStepResult, ComputerStepTiming
+
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    # Borrowing and daemon clients
+    "AsyncBorrowedComputer": (".borrowed", "AsyncBorrowedComputer"),
+    "BorrowedComputer": (".borrowed", "BorrowedComputer"),
+    "AsyncDaemonClient": (".client", "AsyncDaemonClient"),
+    "DaemonClient": (".client", "DaemonClient"),
+    # Configuration
+    "ActionConfig": (".config", "ActionConfig"),
+    "BrowserConfig": (".config", "BrowserConfig"),
+    "BudgetConfig": (".config", "BudgetConfig"),
+    "ComputerConfig": (".config", "ComputerConfig"),
+    "DesktopConfig": (".config", "DesktopConfig"),
+    "ImageConfig": (".config", "ImageConfig"),
+    "NetworkConfig": (".config", "NetworkConfig"),
+    "ResourceConfig": (".config", "ResourceConfig"),
+    "RuntimeConfig": (".config", "RuntimeConfig"),
+    "StorageConfig": (".config", "StorageConfig"),
+    # Errors
+    "ActionOutcomeUnknownError": (".errors", "ActionOutcomeUnknownError"),
+    "BrowserReadinessError": (".errors", "BrowserReadinessError"),
+    "ConfigConflictError": (".errors", "ConfigConflictError"),
+    "FrameValidationError": (".errors", "FrameValidationError"),
+    "ImageReleaseCanaryError": (".errors", "ImageReleaseCanaryError"),
+    "ImageReleaseConflictError": (".errors", "ImageReleaseConflictError"),
+    "ImageReleaseError": (".errors", "ImageReleaseError"),
+    "ImageReleaseIdentityMismatchError": (".errors", "ImageReleaseIdentityMismatchError"),
+    "ImageReleaseLockError": (".errors", "ImageReleaseLockError"),
+    "ImageReleaseManifestError": (".errors", "ImageReleaseManifestError"),
+    "ImageReleaseNotFoundError": (".errors", "ImageReleaseNotFoundError"),
+    "OperationNotAppliedError": (".errors", "OperationNotAppliedError"),
+    "OperationResultUnavailableError": (".errors", "OperationResultUnavailableError"),
+    "RunSequenceConflictError": (".errors", "RunSequenceConflictError"),
+    "SandboxAmbiguousError": (".errors", "SandboxAmbiguousError"),
+    "SandboxUnavailableError": (".errors", "SandboxUnavailableError"),
+    "SessionBorrowError": (".errors", "SessionBorrowError"),
+    "SessionBusyError": (".errors", "SessionBusyError"),
+    "SessionCompatibilityError": (".errors", "SessionCompatibilityError"),
+    "SessionDaemonProtocolError": (".errors", "SessionDaemonProtocolError"),
+    "SessionEnvironmentMismatchError": (".errors", "SessionEnvironmentMismatchError"),
+    "SessionLeaseLostError": (".errors", "SessionLeaseLostError"),
+    "SessionPlacementMalformedError": (".errors", "SessionPlacementMalformedError"),
+    "SessionPlacementMismatchError": (".errors", "SessionPlacementMismatchError"),
+    "SessionPlacementMissingError": (".errors", "SessionPlacementMissingError"),
+    "SessionPlacementUnverifiableError": (".errors", "SessionPlacementUnverifiableError"),
+    "SessionRecoveryRequiredError": (".errors", "SessionRecoveryRequiredError"),
+    "SessionTargetMismatchError": (".errors", "SessionTargetMismatchError"),
+    # Session and image APIs
+    "AsyncHotSessionClient": (".hot_session", "AsyncHotSessionClient"),
+    "HotSessionClient": (".hot_session", "HotSessionClient"),
+    "ImageCanaryRecord": (".image", "ImageCanaryRecord"),
+    "ImageReleaseRecord": (".image", "ImageReleaseRecord"),
+    "ImageReleaseSpec": (".image", "ImageReleaseSpec"),
+    "load_image_release_record": (".image", "load_image_release_record"),
+    "publish_image_release": (".image", "publish_image_release"),
+    "resolve_release_image": (".image", "resolve_release_image"),
+    # Timing and warm-pool helpers
+    "SessionStartupTiming": (".latency", "SessionStartupTiming"),
+    "WarmPoolClaim": (".latency", "WarmPoolClaim"),
+    "WarmPoolClaimMetrics": (".latency", "WarmPoolClaimMetrics"),
+    "WarmPoolEntry": (".latency", "WarmPoolEntry"),
+    "WarmPoolFillResult": (".latency", "WarmPoolFillResult"),
+    "WarmPoolPolicy": (".latency", "WarmPoolPolicy"),
+    "WarmPoolReconcileResult": (".latency", "WarmPoolReconcileResult"),
+    "estimate_pool_idle_cost": (".latency", "estimate_pool_idle_cost"),
+    "estimate_warm_idle_cost": (".latency", "estimate_warm_idle_cost"),
+    "pool_config_identity": (".latency", "pool_config_identity"),
+    "validate_first_frame": (".latency", "validate_first_frame"),
+    "ComputerSandboxManager": (".manager", "ComputerSandboxManager"),
+    # Models
+    "ActionBatchResult": (".models", "ActionBatchResult"),
+    "ActionBatchTiming": (".models", "ActionBatchTiming"),
+    "ActionDecision": (".models", "ActionDecision"),
+    "ActionItemResult": (".models", "ActionItemResult"),
+    "ActionResult": (".models", "ActionResult"),
+    "ArtifactInfo": (".models", "ArtifactInfo"),
+    "ArtifactSyncResult": (".models", "ArtifactSyncResult"),
+    "ComputerAction": (".models", "ComputerAction"),
+    "ComputerSessionHandle": (".models", "ComputerSessionHandle"),
+    "ComputerStatus": (".models", "ComputerStatus"),
+    "CoordinateSpace": (".models", "CoordinateSpace"),
+    "DebugUrls": (".models", "DebugUrls"),
+    "DisplayGeometry": (".models", "DisplayGeometry"),
+    "DisplayInfo": (".models", "DisplayInfo"),
+    "Point": (".models", "Point"),
+    "ProcessStatus": (".models", "ProcessStatus"),
+    "Recording": (".models", "Recording"),
+    "Region": (".models", "Region"),
+    "SandboxCleanupItem": (".models", "SandboxCleanupItem"),
+    "SandboxCleanupResult": (".models", "SandboxCleanupResult"),
+    "SandboxRef": (".models", "SandboxRef"),
+    "Screenshot": (".models", "Screenshot"),
+    "ScreenshotOptions": (".models", "ScreenshotOptions"),
+    "SessionRecoveryAcknowledgement": (".models", "SessionRecoveryAcknowledgement"),
+    "SessionRecoveryStatus": (".models", "SessionRecoveryStatus"),
+    "X11Window": (".models", "X11Window"),
+    # Observation, registry, orchestration, and steps
+    "ActionObservationResult": (".observations", "ActionObservationResult"),
+    "AsyncObservationClient": (".observations", "AsyncObservationClient"),
+    "ObservationClient": (".observations", "ObservationClient"),
+    "SandboxRegistry": (".registry", "SandboxRegistry"),
+    "AsyncComputerSandbox": (".sandbox", "AsyncComputerSandbox"),
+    "ComputerSandbox": (".sandbox", "ComputerSandbox"),
+    "ModalDaemonCommandResult": (".sandbox", "ModalDaemonCommandResult"),
+    "ModalDaemonEndpoint": (".sandbox", "ModalDaemonEndpoint"),
+    "ModalDaemonEndpointPath": (".sandbox", "ModalDaemonEndpointPath"),
+    "ModalSandboxExecResult": (".sandbox", "ModalSandboxExecResult"),
+    "ModalVolumeMount": (".sandbox", "ModalVolumeMount"),
+    "modal_daemon_endpoint": (".sandbox", "modal_daemon_endpoint"),
+    "modal_daemon_env": (".sandbox", "modal_daemon_env"),
+    "run_modal_daemon_command": (".sandbox", "run_modal_daemon_command"),
+    "run_modal_daemon_command_with_fallback": (
+        ".sandbox",
+        "run_modal_daemon_command_with_fallback",
+    ),
+    "ComputerStepResult": (".steps", "ComputerStepResult"),
+    "ComputerStepTiming": (".steps", "ComputerStepTiming"),
+}
 
 __all__ = [
     "ActionBatchResult",
@@ -219,3 +353,21 @@ __all__ = [
     "run_modal_daemon_command_with_fallback",
     "validate_first_frame",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute_name = target
+    module = import_module(module_name, __name__)
+    # Deliberately do not catch ImportError or AttributeError here.  Optional
+    # dependencies should fail at the requested API boundary, not be hidden by
+    # the compatibility layer.
+    value = getattr(module, attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

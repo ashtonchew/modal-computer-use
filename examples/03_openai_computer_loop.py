@@ -212,17 +212,6 @@ def _normalize_for_preflight(
     normalized: list[ComputerAction] = []
     for action in actions:
         kind = action.get("type") or action.get("action")
-        if kind == "keypress" and isinstance(action.get("keys"), list):
-            keys = action["keys"]
-            if not keys:
-                raise ActionValidationError("OpenAI keypress action requires keys")
-            for key in keys:
-                single_key_action = {
-                    key_name: value for key_name, value in action.items() if key_name != "keys"
-                }
-                single_key_action["key"] = key
-                normalized.append(parse_action(adapter.normalize(single_key_action)))
-            continue
         if kind == "scroll":
             for axis_action in _split_scroll_axes(action):
                 normalized.append(parse_action(adapter.normalize(axis_action)))

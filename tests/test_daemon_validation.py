@@ -137,7 +137,11 @@ def test_command_e2big_is_mapped_to_sanitized_422(test_client, app) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "command_too_large"
-    assert response.json()["details"] == {"errno": "E2BIG"}
+    assert response.json()["details"] == {
+        "errno": "E2BIG",
+        "retry_safe": True,
+        "emission_state": "not_started",
+    }
     assert "secret-value" not in response.text
 
 
@@ -436,6 +440,7 @@ def test_action_validate_matches_run_timeout_and_screenshot_preflight(tmp_path) 
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             max_action_timeout_ms=1_000,
+            default_action_timeout_ms=1_000,
             screenshot_max_pixels=1_000,
         )
     )
@@ -464,6 +469,7 @@ def test_keyboard_hold_rejects_nested_actions_before_execution(tmp_path) -> None
             recordings_dir=tmp_path / "recordings",
             local_token="dev",
             max_action_timeout_ms=1_000,
+            default_action_timeout_ms=1_000,
         )
     )
 

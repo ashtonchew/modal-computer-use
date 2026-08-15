@@ -331,8 +331,8 @@ def _validate_wheel(wheel: Path, *, root: Path, python: str) -> None:
             app = create_app(
                 DaemonSettings(
                     backend="mock",
-                    artifacts_dir=Path("artifacts"),
-                    recordings_dir=Path("recordings"),
+                    artifacts_dir=Path.cwd() / "artifacts",
+                    recordings_dir=Path.cwd() / "recordings",
                     local_token="dev",
                 )
             )

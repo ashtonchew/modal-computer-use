@@ -29,6 +29,7 @@ from modal_computer_use.sandbox import (
     ModalVolumeMount,
     _connect_token_parts,
     _daemon_environment,
+    _has_artifact_volume_mount,
     cleanup_modal_benchmark_run,
     create_modal_benchmark_computer,
     create_modal_benchmark_runner,
@@ -46,6 +47,17 @@ from modal_computer_use.state import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_persistent_artifact_volume_matching_uses_path_components() -> None:
+    assert _has_artifact_volume_mount(
+        {"/home/desktop/artifacts-extra": object()},
+        "/home/desktop/artifacts",
+    ) is False
+    assert _has_artifact_volume_mount(
+        {"/home/desktop": object()},
+        "/home/desktop/artifacts",
+    ) is True
 
 
 class FakeProbe:
@@ -666,7 +678,10 @@ def test_candidate_v2_i6pn_target_uses_matched_named_image_and_private_network(
     )
 
     args, kwargs = FakeSandbox.experimental_create_calls[0]
-    assert args == ("python", "-m", "modal_computer_use.daemon")
+    assert args[0:2] == ("sh", "-c")
+    assert "COMPUTER_USE_DAEMON_USER" in args[2]
+    assert args[3] == "modal-computer-use-daemon"
+    assert args[4:] == ("python", "-m", "modal_computer_use.daemon")
     assert kwargs["image"] == "named-image"
     assert kwargs["cpu"] == 4.0
     assert kwargs["memory"] == 8192

@@ -7,15 +7,17 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from modal_computer_use.daemon.auth import OWNER_PROOF_HEADER, has_owner_proof
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.leases import lease_credentials_from_headers
 from modal_computer_use.daemon.receipts import (
     MAX_OPERATION_SEQUENCE,
     RECEIPT_PROTOCOL_VERSION,
 )
+from modal_computer_use.daemon.routes.leases import _release_all_before_lease_transition
 
 router = APIRouter(include_in_schema=False)
-OWNER_PROOF_HEADER = "x-computer-use-owner-proof"
+__all__ = ["OWNER_PROOF_HEADER"]
 
 
 class _AcknowledgeRequest(BaseModel):
@@ -177,16 +179,7 @@ async def _require_owner_or_current_lease(request: Request) -> None:
 
 
 def _has_owner_proof(request: Request) -> bool:
-    provided = request.headers.get(OWNER_PROOF_HEADER)
-    if not isinstance(provided, str) or not provided:
-        return False
-    settings = request.app.state.settings
-    expected_tokens = (settings.tunnel_token, settings.local_token)
-    matched = False
-    for expected in expected_tokens:
-        if isinstance(expected, str) and expected:
-            matched = secrets.compare_digest(expected, provided) or matched
-    return matched
+    return has_owner_proof(request)
 
 
 def _receipt_access_denied_error(message: str) -> DaemonError:
@@ -202,6 +195,14 @@ async def _acknowledge_and_reset_cancellation_safe(
     incident_id: str,
 ) -> dict[str, object]:
     async def acknowledge_and_reset() -> dict[str, object]:
+        async with state.lease_lock:
+            lease_status = state.lease_coordinator.status()
+        run_id = lease_status.get("run_id")
+        await _release_all_before_lease_transition(
+            state,
+            run_id if isinstance(run_id, str) else None,
+            force=True,
+        )
         result = await state.receipt_journal.acknowledge(incident_id)
         async with state.lease_lock:
             state.lease_coordinator.reset_after_owner_recovery()
@@ -232,6 +233,11 @@ async def _resolve_and_release_cancellation_safe(
     async def resolve_and_release() -> dict[str, object]:
         result = await state.receipt_journal.resolve(run_id, sequence)
         if result["state"] == "MISSING":
+            await _release_all_before_lease_transition(
+                state,
+                admitted_lease.run_id,
+                force=True,
+            )
             async with state.lease_lock:
                 state.lease_coordinator.release_validated(admitted_lease)
         return result

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import subprocess
+import time
+from dataclasses import replace
 
+import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from modal_computer_use.daemon.app import create_app
@@ -224,6 +229,133 @@ class _BrokenWaitProcess:
 
     def kill(self) -> None:
         self.killed = True
+
+
+class _SlowLifecycleProcess:
+    def __init__(self) -> None:
+        self.stdin = _FakeStdin()
+        self._return_code: int | None = None
+
+    def poll(self) -> int | None:
+        return self._return_code
+
+    def terminate(self) -> None:
+        pass
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        time.sleep(0.08)
+        self._return_code = 0
+        return 0
+
+    def kill(self) -> None:
+        self._return_code = -9
+
+
+@pytest.mark.parametrize("operation", ["stop", "delete"])
+def test_recording_lifecycle_routes_do_not_block_event_loop(
+    tmp_path, monkeypatch, operation: str
+) -> None:
+    process = _SlowLifecycleProcess()
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        runtime_dir=tmp_path / "runtime",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    recording_settings = replace(settings, backend="x11")
+    registry = RecordingRegistry(
+        recording_settings,
+        artifact_store=app.state.artifacts,
+        popen_factory=lambda *args, **kwargs: process,
+    )
+    app.state.recordings = registry
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            started = registry.start()
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                timer_delay: list[float] = []
+
+                timer_started_at = time.perf_counter()
+
+                async def short_timer() -> None:
+                    await asyncio.sleep(0.01)
+                    timer_delay.append(time.perf_counter() - timer_started_at)
+
+                timer = asyncio.create_task(short_timer())
+                request_task = asyncio.create_task(
+                    client.request(
+                    "POST" if operation == "stop" else "DELETE",
+                    f"/v1/recordings/{started.id}/stop"
+                    if operation == "stop"
+                    else f"/v1/recordings/{started.id}",
+                    )
+                )
+                response = await request_task
+                await timer
+                assert response.status_code == 200
+                assert timer_delay[0] < 0.05
+
+    asyncio.run(exercise())
+
+
+def test_recording_start_budget_rollback_does_not_block_event_loop(
+    tmp_path, monkeypatch
+) -> None:
+    process = _SlowLifecycleProcess()
+    monkeypatch.setattr(recordings_module.shutil, "which", lambda _tool: "/usr/bin/ffmpeg")
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        runtime_dir=tmp_path / "runtime",
+        local_token="dev",
+        max_recording_seconds=1e-9,
+    )
+    app = create_app(settings)
+    app.state.recordings = RecordingRegistry(
+        replace(settings, backend="x11"),
+        artifact_store=app.state.artifacts,
+        popen_factory=lambda *args, **kwargs: process,
+    )
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                timer_delay: list[float] = []
+                original_enforce = app.state.budget_policy.enforce
+
+                def enforce(*kinds: str) -> None:
+                    if kinds == ("recordings",):
+                        started_at = time.perf_counter()
+                        asyncio.get_running_loop().call_later(
+                            0.01,
+                            lambda: timer_delay.append(time.perf_counter() - started_at),
+                        )
+                    original_enforce(*kinds)
+
+                app.state.budget_policy.enforce = enforce
+                response = await client.post("/v1/recordings", json={})
+                await asyncio.sleep(0.02)
+
+        assert response.status_code == 429
+        assert timer_delay[0] < 0.05
+
+    asyncio.run(exercise())
 
 
 def test_recording_shutdown_force_stops_process_after_stop_error(tmp_path, monkeypatch) -> None:

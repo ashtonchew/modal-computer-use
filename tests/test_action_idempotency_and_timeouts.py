@@ -435,7 +435,7 @@ def test_action_timeout_continue_on_error_executes_next_action(tmp_path) -> None
 
 
 def test_action_timeout_rejects_values_above_configured_max(tmp_path) -> None:
-    app = _app(tmp_path, max_action_timeout_ms=25)
+    app = _app(tmp_path, default_action_timeout_ms=25, max_action_timeout_ms=25)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         response = client.post(
             "/v1/actions/run",
@@ -448,7 +448,7 @@ def test_action_timeout_rejects_values_above_configured_max(tmp_path) -> None:
 
 
 def test_nested_hold_timeout_rejects_values_above_configured_max(tmp_path) -> None:
-    app = _app(tmp_path, max_action_timeout_ms=25)
+    app = _app(tmp_path, default_action_timeout_ms=25, max_action_timeout_ms=25)
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
         response = client.post(
             "/v1/actions/run",

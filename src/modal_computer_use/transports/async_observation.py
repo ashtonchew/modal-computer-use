@@ -62,9 +62,13 @@ class AsyncObservationStreamTransport:
         self._receiver_error: DaemonHTTPError | None = None
         self._next_id = 1
         self._transport_timing = False
+        self._timing_transition = False
+        self._timing_transition_request_id: str | None = None
+        self._timing_transition_previous: bool | None = None
         self._connect_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
         self._consumer_lock = asyncio.Lock()
+        self._configure_lock = asyncio.Lock()
         self._pending: dict[str, asyncio.Future[Any]] = {}
         self._pending_frames: deque[ObservationFrame] = deque()
         self._frame_queue: asyncio.Queue[ObservationFrame | BaseException | object] = (
@@ -73,6 +77,7 @@ class AsyncObservationStreamTransport:
         self._receiver_task: asyncio.Task[None] | None = None
         self._probe_parts: dict[str, tuple[dict[str, Any], bytes]] = {}
         self._timed_frames: dict[Any, ObservationFrame] = {}
+        self._transition_frames: dict[Any, ObservationFrame] = {}
 
     async def __aenter__(self) -> AsyncObservationStreamTransport:
         await self._ensure_connected()
@@ -154,7 +159,21 @@ class AsyncObservationStreamTransport:
         return frame
 
     async def configure(self, payload: dict[str, Any]) -> None:
-        await self._request("configure", payload)
+        async with self._configure_lock:
+            previous_transport_timing = self._transport_timing
+            self._timing_transition_previous = previous_transport_timing
+            self._transport_timing = bool(
+                payload.get("transport_timing", previous_transport_timing)
+            )
+            self._timing_transition = True
+            try:
+                await self._request("configure", payload)
+            except BaseException:
+                self._transport_timing = previous_transport_timing
+                raise
+            finally:
+                self._timing_transition = False
+                self._timing_transition_previous = None
 
     async def transport_probe(
         self,
@@ -212,6 +231,8 @@ class AsyncObservationStreamTransport:
         self._next_id += 1
         future: asyncio.Future[Any] = loop.create_future()
         self._pending[request_id] = future
+        if op == "configure":
+            self._timing_transition_request_id = request_id
         mutating = op in self._MUTATING_OPS
         possibly_sent = False
         try:
@@ -232,6 +253,9 @@ class AsyncObservationStreamTransport:
             if possibly_sent:
                 await self._poison_and_close()
             raise
+        finally:
+            if self._timing_transition_request_id == request_id:
+                self._timing_transition_request_id = None
 
     async def _ensure_connected(self) -> ClientConnection:
         if self._receiver_error is not None:
@@ -340,6 +364,17 @@ class AsyncObservationStreamTransport:
                 code="observation_stream_protocol_error",
             )
         kind = data.get("type")
+        if kind != "transport_timing":
+            await self._flush_transition_frames()
+        if (
+            kind in {"error", "result"}
+            and data.get("id") == self._timing_transition_request_id
+        ):
+            if kind == "error" and self._timing_transition_previous is not None:
+                self._transport_timing = self._timing_transition_previous
+            self._timing_transition = False
+            self._timing_transition_request_id = None
+            self._timing_transition_previous = None
         if kind == "error":
             error = _observation_error(data)
             self._resolve(data.get("id"), error=error)
@@ -372,7 +407,10 @@ class AsyncObservationStreamTransport:
                     },
                 )
                 return
-            frame = self._timed_frames.pop(data.get("seq"), None)
+            sequence = data.get("seq")
+            frame = self._transition_frames.pop(sequence, None)
+            if frame is None:
+                frame = self._timed_frames.pop(sequence, None)
             if frame is not None:
                 frame = ObservationFrame(
                     payload=frame.payload,
@@ -398,7 +436,9 @@ class AsyncObservationStreamTransport:
                 if isinstance(data.get("server_emit_timing_ms"), dict)
                 else None,
             )
-            if self._transport_timing and frame.transport_timing is None:
+            if frame.transport_timing is None and self._timing_transition:
+                self._transition_frames[data.get("seq")] = frame
+            elif self._transport_timing and frame.transport_timing is None:
                 self._timed_frames[data.get("seq")] = frame
             else:
                 await self._deliver_frame(frame)
@@ -421,6 +461,12 @@ class AsyncObservationStreamTransport:
             self._resolve(request_id, value=frame)
         else:
             await self._frame_queue.put(frame)
+
+    async def _flush_transition_frames(self) -> None:
+        frames = tuple(self._transition_frames.values())
+        self._transition_frames.clear()
+        for frame in frames:
+            await self._deliver_frame(frame)
 
     def _resolve(
         self,

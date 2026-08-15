@@ -82,7 +82,6 @@ class ActionsNamespace(Namespace):
         continue_on_error: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
         max_action_timeout_ms: int | None = None,
-        idempotency_key: str | None = None,
         call_id: str | None = None,
         run_id: str | None = None,
         sequence: int | None = None,
@@ -99,11 +98,9 @@ class ActionsNamespace(Namespace):
             sequence=sequence,
             source=source,
         )
-        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         data, response_headers = self._client.post_bytes_with_headers(
             "/v1/actions/run/raw-screenshot",
             json=payload,
-            headers=headers,
             _mutation=True,
         )
         result_header = response_headers.get("x-computer-use-action-result")
@@ -135,7 +132,6 @@ class ActionsNamespace(Namespace):
         continue_on_error: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
         max_action_timeout_ms: int | None = None,
-        idempotency_key: str | None = None,
         call_id: str | None = None,
         run_id: str | None = None,
         sequence: int | None = None,
@@ -167,11 +163,9 @@ class ActionsNamespace(Namespace):
                 "change_signal": change_signal,
             }
         )
-        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         data, response_headers = self._client.post_bytes_with_headers(
             "/v1/actions/run/observe-change/raw-screenshot",
             json=payload,
-            headers=headers,
             _mutation=True,
         )
         result = _action_result_header(response_headers)
@@ -307,7 +301,6 @@ class AsyncActionsNamespace(AsyncNamespace):
         continue_on_error: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
         max_action_timeout_ms: int | None = None,
-        idempotency_key: str | None = None,
         call_id: str | None = None,
         run_id: str | None = None,
         sequence: int | None = None,
@@ -324,11 +317,9 @@ class AsyncActionsNamespace(AsyncNamespace):
             sequence=sequence,
             source=source,
         )
-        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         data, response_headers = await self._client.post_bytes_with_headers(
             "/v1/actions/run/raw-screenshot",
             json=payload,
-            headers=headers,
             _mutation=True,
         )
         result_header = response_headers.get("x-computer-use-action-result")
@@ -360,7 +351,6 @@ class AsyncActionsNamespace(AsyncNamespace):
         continue_on_error: bool = False,
         screenshot_options: ScreenshotOptions | None = None,
         max_action_timeout_ms: int | None = None,
-        idempotency_key: str | None = None,
         call_id: str | None = None,
         run_id: str | None = None,
         sequence: int | None = None,
@@ -392,11 +382,9 @@ class AsyncActionsNamespace(AsyncNamespace):
                 "change_signal": change_signal,
             }
         )
-        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         data, response_headers = await self._client.post_bytes_with_headers(
             "/v1/actions/run/observe-change/raw-screenshot",
             json=payload,
-            headers=headers,
             _mutation=True,
         )
         result = _action_result_header(response_headers)

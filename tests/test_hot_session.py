@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
+from modal_computer_use.errors import DaemonHTTPError
 from modal_computer_use.hot_session import HotSessionClient
 from modal_computer_use.models import ActionBatchResult
-from modal_computer_use.transports.hot_session import _websocket_url
+from modal_computer_use.transports.hot_session import HotSessionTransport, _websocket_url
 
 
 def _app(tmp_path, **overrides):
@@ -134,6 +137,92 @@ def test_hot_session_client_marshals_actions_and_binary_results() -> None:
     assert transport.calls[1][1]["screenshot_after"] is True
 
 
+@pytest.mark.parametrize("failure", [TimeoutError("timed out"), ConnectionError("closed")])
+def test_sync_hot_session_poison_closes_after_uncertain_mutation(failure: Exception) -> None:
+    websocket = _FailingHotWebSocket(failure=failure)
+    transport = HotSessionTransport("https://daemon.example", websocket=websocket)  # type: ignore[arg-type]
+
+    with pytest.raises(type(failure)):
+        transport.request("run_actions", {"actions": []})
+
+    with pytest.raises(DaemonHTTPError) as exc_info:
+        transport.request("run_actions", {"actions": []})
+
+    assert exc_info.value.code == "hot_session_poisoned"
+    assert len(websocket.sent) == 1
+    assert websocket.closed is True
+
+
+def test_sync_hot_session_serialization_failure_does_not_poison_mutation() -> None:
+    websocket = _FailingHotWebSocket()
+    transport = HotSessionTransport("https://daemon.example", websocket=websocket)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError):
+        transport.request("run_actions", {"actions": [object()]})
+
+    assert websocket.sent == []
+    assert websocket.closed is False
+    assert transport._poisoned is False
+
+
+def test_sync_hot_session_poison_closes_after_mutation_protocol_failure() -> None:
+    websocket = _FailingHotWebSocket(
+        response=json.dumps({"type": "result", "id": "unexpected", "result": {}})
+    )
+    transport = HotSessionTransport("https://daemon.example", websocket=websocket)  # type: ignore[arg-type]
+
+    with pytest.raises(DaemonHTTPError) as first:
+        transport.request("run_actions", {"actions": []})
+    assert first.value.code == "hot_session_protocol_error"
+
+    with pytest.raises(DaemonHTTPError) as second:
+        transport.request("run_actions", {"actions": []})
+    assert second.value.code == "hot_session_poisoned"
+    assert len(websocket.sent) == 1
+    assert websocket.closed is True
+
+
+def test_sync_hot_session_poison_closes_after_malformed_error_envelope() -> None:
+    websocket = _FailingHotWebSocket(response=json.dumps({"type": "error", "id": "1"}))
+    transport = HotSessionTransport("https://daemon.example", websocket=websocket)  # type: ignore[arg-type]
+
+    with pytest.raises(DaemonHTTPError) as first:
+        transport.request("run_actions", {"actions": []})
+    assert first.value.code == "hot_session_error"
+
+    with pytest.raises(DaemonHTTPError) as second:
+        transport.request("run_actions", {"actions": []})
+    assert second.value.code == "hot_session_poisoned"
+    assert websocket.closed is True
+
+
+def test_sync_hot_session_taints_safe_nonmutation_and_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _FailingHotWebSocket(
+        response=json.dumps({"type": "result", "id": "unexpected", "result": {}})
+    )
+    second = _FailingHotWebSocket(
+        response=json.dumps(
+            {"type": "result", "id": "2", "result": {"request_id": "2"}}
+        )
+    )
+
+    def reconnect(*_args: object, **_kwargs: object) -> _FailingHotWebSocket:
+        return second
+
+    monkeypatch.setattr("modal_computer_use.transports.hot_session.connect", reconnect)
+    transport = HotSessionTransport("https://daemon.example", websocket=first)  # type: ignore[arg-type]
+
+    with pytest.raises(DaemonHTTPError) as first_error:
+        transport.ping()
+    assert first_error.value.code == "hot_session_protocol_error"
+    assert first.closed is True
+
+    assert transport.ping() == {"request_id": "2"}
+    assert second.closed is False
+
+
 class _FakeHotTransport:
     def __init__(self) -> None:
         self.calls = []
@@ -152,3 +241,25 @@ class _FakeHotTransport:
             result={"ok": True, "results": []},
             content_type="image/png",
         )
+
+
+class _FailingHotWebSocket:
+    def __init__(self, *, failure: Exception | None = None, response: str | None = None) -> None:
+        self._failure = failure
+        self._response = response
+        self.sent: list[str] = []
+        self.closed = False
+
+    def recv(self, **_kwargs):
+        if not self.sent:
+            return json.dumps({"type": "ready"})
+        if self._failure is not None:
+            raise self._failure
+        assert self._response is not None
+        return self._response
+
+    def send(self, message: str) -> None:
+        self.sent.append(message)
+
+    def close(self) -> None:
+        self.closed = True

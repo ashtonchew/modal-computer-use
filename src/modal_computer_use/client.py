@@ -35,6 +35,7 @@ class DaemonClient:
         transport: HTTPTransport | None = None,
         _token_resolver: Callable[[], str] | None = None,
         _mutation_executor: Callable[[Callable[[Mapping[str, str]], Any]], Any] | None = None,
+        _owner_proof: str | None = None,
     ) -> None:
         self.transport = transport or HTTPTransport(
             base_url,
@@ -42,7 +43,10 @@ class DaemonClient:
             timeout=timeout,
             http2=http2,
             _token_resolver=_token_resolver,
+            owner_proof=_owner_proof,
         )
+        if _owner_proof is not None and transport is not None:
+            transport.owner_proof = _owner_proof
         self._mutation_executor = _mutation_executor
 
     @property
@@ -221,6 +225,7 @@ class AsyncDaemonClient:
             [Callable[[Mapping[str, str]], Awaitable[Any]]], Awaitable[Any]
         ]
         | None = None,
+        _owner_proof: str | None = None,
     ) -> None:
         self.transport = transport or AsyncHTTPTransport(
             base_url,
@@ -228,7 +233,10 @@ class AsyncDaemonClient:
             timeout=timeout,
             http2=http2,
             _metadata_headers=_metadata_headers,
+            owner_proof=_owner_proof,
         )
+        if _owner_proof is not None and transport is not None:
+            transport.owner_proof = _owner_proof
         self._mutation_executor = _mutation_executor
         self._children: weakref.WeakSet[AsyncHotSessionClient | AsyncObservationClient] = (
             weakref.WeakSet()

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from re import _parser as _regex_parser
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,6 +26,14 @@ from modal_computer_use.models import (
 
 class Schema(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class DaemonErrorResponse(Schema):
+    """Structured error envelope emitted by every daemon validation/failure path."""
+
+    code: str
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ObservationActionCaptureRequest(ActionBatchRequest):
@@ -213,9 +222,10 @@ class WaitForWindowRequest(Schema):
     def _valid_title_regex(cls, value: str | None) -> str | None:
         if value is None:
             return value
+        _validate_window_regex_safety(value)
         try:
             re.compile(value)
-        except re.error as exc:
+        except (re.error, OverflowError) as exc:
             raise ValueError("title_regex must be a valid regular expression") from exc
         return value
 
@@ -224,6 +234,336 @@ class WaitForWindowRequest(Schema):
         if self.title_regex is None and self.class_name is None and self.pid is None:
             raise ValueError("wait-for requires title_regex, class_name, or pid")
         return self
+
+
+_MAX_WINDOW_REGEX_LENGTH = 256
+_MAX_WINDOW_REGEX_REPEAT = 100
+_MAX_WINDOW_REGEX_FIXED_REPEAT = 4096
+_UNSAFE_WINDOW_REGEX_MARKERS = (
+    "(?=",
+    "(?!",
+    "(?<=",
+    "(?<!",
+    "(?P=",
+    "(?(",
+)
+
+
+def _validate_window_regex_safety(pattern: str) -> None:
+    """Allow Python regex features whose repeat structure is bounded."""
+    if len(pattern) > _MAX_WINDOW_REGEX_LENGTH:
+        raise ValueError("title_regex is too long")
+    if any(marker in pattern for marker in _UNSAFE_WINDOW_REGEX_MARKERS):
+        raise ValueError("title_regex contains an unsupported construct")
+    try:
+        parsed = _regex_parser.parse(pattern, 0)
+    except re.error:
+        return
+    except OverflowError as exc:
+        raise ValueError("title_regex repeat bound is too large") from exc
+    _validate_window_regex_tokens(parsed, flags=parsed.state.flags)
+
+
+type _RegexCharacterSet = frozenset[int] | str
+type _RegexRepeatProfile = tuple[str, _RegexCharacterSet | None]
+
+
+def _validate_window_regex_tokens(
+    tokens: list[tuple[Any, Any]],
+    *,
+    flags: int,
+) -> tuple[bool, bool, bool, bool]:
+    """Return empty, branch, repeat, and unresolved-ambiguity facts."""
+    can_empty = True
+    has_branch = False
+    has_repeat = False
+    previous_repeat: _RegexRepeatProfile | None = None
+    active_repeats: list[_RegexCharacterSet | None] = []
+    ambiguous_repeat_chain = False
+
+    def note_repeat(profile: _RegexRepeatProfile | None) -> None:
+        nonlocal active_repeats, ambiguous_repeat_chain
+        if profile is None:
+            return
+        characters = profile[1]
+        if any(
+            not _character_sets_provably_disjoint(active, characters)
+            for active in active_repeats
+        ):
+            ambiguous_repeat_chain = True
+        active_repeats = [
+            active
+            for active in active_repeats
+            if not _character_sets_provably_disjoint(active, characters)
+        ]
+        active_repeats.append(characters)
+
+    def note_required(characters: _RegexCharacterSet | None) -> None:
+        nonlocal active_repeats, ambiguous_repeat_chain
+        if ambiguous_repeat_chain:
+            raise ValueError("title_regex has separated ambiguous repeats")
+        active_repeats = [
+            active
+            for active in active_repeats
+            if not _character_sets_provably_disjoint(active, characters)
+        ]
+        if not active_repeats:
+            ambiguous_repeat_chain = False
+
+    for opcode, argument in tokens:
+        name = getattr(opcode, "name", str(opcode))
+        if name.startswith("GROUPREF"):
+            raise ValueError("title_regex backreferences are unsupported")
+        if name in {"ASSERT", "ASSERT_NOT"}:
+            raise ValueError("title_regex lookarounds are unsupported")
+        if name in {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}:
+            minimum, maximum, body = argument
+            if maximum != _regex_parser.MAXREPEAT:
+                if minimum == maximum and maximum > _MAX_WINDOW_REGEX_FIXED_REPEAT:
+                    raise ValueError("title_regex repeat bound is too large")
+                if minimum != maximum and maximum > _MAX_WINDOW_REGEX_REPEAT:
+                    raise ValueError("title_regex variable repeat bound is too large")
+            body_empty, body_branch, body_repeat, _body_ambiguous = (
+                _validate_window_regex_tokens(
+                body,
+                flags=flags,
+            )
+            )
+            if body_empty or body_branch or body_repeat:
+                raise ValueError("title_regex has an unsafe quantified group")
+            current_repeat = (
+                (repr(body), _regex_character_set(body, flags=flags))
+                if minimum != maximum
+                else None
+            )
+            _reject_overlapping_adjacent_repeats(previous_repeat, current_repeat)
+            if current_repeat is not None:
+                note_repeat(current_repeat)
+            elif minimum > 0:
+                note_required(_regex_character_set(body, flags=flags))
+            previous_repeat = current_repeat
+            has_repeat = True
+            can_empty &= minimum == 0
+            continue
+        if name == "BRANCH":
+            _none, branches = argument
+            branch_facts = [
+                _validate_window_regex_tokens(branch, flags=flags) for branch in branches
+            ]
+            branch_prefixes = [
+                _regex_prefix_character_set(branch, flags=flags) for branch in branches
+            ]
+            if any(facts[0] for facts in branch_facts) or any(
+                not _character_sets_provably_disjoint(left, right)
+                for index, left in enumerate(branch_prefixes)
+                for right in branch_prefixes[index + 1 :]
+            ):
+                raise ValueError("title_regex has ambiguous alternation")
+            can_empty &= any(facts[0] for facts in branch_facts)
+            has_branch = True
+            branch_has_repeat = any(facts[2] for facts in branch_facts)
+            has_repeat |= branch_has_repeat
+            ambiguous_repeat_chain |= any(facts[3] for facts in branch_facts)
+            if branch_has_repeat:
+                note_repeat((repr(argument), None))
+            elif any(_tokens_have_consuming(branch) for branch in branches):
+                note_required(None)
+            previous_repeat = None
+            continue
+        if name == "SUBPATTERN":
+            _group, add_flags, del_flags, body = argument
+            subpattern_flags = (flags | add_flags) & ~del_flags
+            body_empty, body_branch, body_repeat, body_ambiguous = (
+                _validate_window_regex_tokens(
+                body,
+                flags=subpattern_flags,
+            )
+            )
+            can_empty &= body_empty
+            has_branch |= body_branch
+            has_repeat |= body_repeat
+            ambiguous_repeat_chain |= body_ambiguous
+            current_repeat = _sole_repeat_profile(body, flags=subpattern_flags)
+            _reject_overlapping_adjacent_repeats(previous_repeat, current_repeat)
+            if current_repeat is not None:
+                note_repeat(current_repeat)
+            elif body_repeat:
+                current_repeat = (repr(body), None)
+                _reject_overlapping_adjacent_repeats(previous_repeat, current_repeat)
+                note_repeat(current_repeat)
+            elif _tokens_have_consuming(body):
+                note_required(_regex_character_set(body, flags=subpattern_flags))
+            previous_repeat = current_repeat
+            continue
+        if name == "ATOMIC_GROUP":
+            body_empty, _body_branch, body_repeat, body_ambiguous = (
+                _validate_window_regex_tokens(
+                argument,
+                flags=flags,
+            )
+            )
+            can_empty &= body_empty
+            ambiguous_repeat_chain |= body_ambiguous
+            current_repeat = _sole_repeat_profile(argument, flags=flags)
+            _reject_overlapping_adjacent_repeats(previous_repeat, current_repeat)
+            if current_repeat is not None:
+                note_repeat(current_repeat)
+            elif body_repeat:
+                current_repeat = (repr(argument), None)
+                _reject_overlapping_adjacent_repeats(previous_repeat, current_repeat)
+                note_repeat(current_repeat)
+            elif _tokens_have_consuming(argument):
+                note_required(None)
+            previous_repeat = current_repeat
+            continue
+        if name in {"AT", "SUCCESS", "FAILURE"}:
+            continue
+        can_empty = False
+        note_required(_regex_character_set([(opcode, argument)], flags=flags))
+        previous_repeat = None
+    return can_empty, has_branch, has_repeat, ambiguous_repeat_chain
+
+
+def _sole_repeat_profile(
+    tokens: list[tuple[Any, Any]],
+    *,
+    flags: int,
+) -> _RegexRepeatProfile | None:
+    if len(tokens) != 1:
+        return None
+    opcode, argument = tokens[0]
+    name = getattr(opcode, "name", str(opcode))
+    if name in {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}:
+        minimum, maximum, body = argument
+        if minimum == maximum:
+            return None
+        return repr(body), _regex_character_set(body, flags=flags)
+    if name == "SUBPATTERN":
+        _group, add_flags, del_flags, body = argument
+        return _sole_repeat_profile(body, flags=(flags | add_flags) & ~del_flags)
+    return None
+
+
+def _tokens_have_consuming(tokens: list[tuple[Any, Any]]) -> bool:
+    return any(
+        getattr(opcode, "name", str(opcode)) not in {"AT", "SUCCESS", "FAILURE"}
+        for opcode, _argument in tokens
+    )
+
+
+def _reject_overlapping_adjacent_repeats(
+    previous: _RegexRepeatProfile | None,
+    current: _RegexRepeatProfile | None,
+) -> None:
+    if previous is None or current is None:
+        return
+    previous_key, previous_characters = previous
+    current_key, current_characters = current
+    if previous_key == current_key or not _character_sets_provably_disjoint(
+        previous_characters,
+        current_characters,
+    ):
+        raise ValueError("title_regex has adjacent ambiguous repeats")
+
+
+def _regex_character_set(
+    tokens: list[tuple[Any, Any]],
+    *,
+    flags: int,
+) -> _RegexCharacterSet | None:
+    if len(tokens) != 1:
+        return None
+    opcode, argument = tokens[0]
+    name = getattr(opcode, "name", str(opcode))
+    if name == "SUBPATTERN":
+        _group, add_flags, del_flags, body = argument
+        return _regex_character_set(body, flags=(flags | add_flags) & ~del_flags)
+    if name == "CATEGORY":
+        return f"category:{getattr(argument, 'name', argument)}"
+    if name == "LITERAL":
+        return None if flags & re.IGNORECASE else frozenset({int(argument)})
+    if name != "IN" or flags & re.IGNORECASE:
+        return None
+    characters: set[int] = set()
+    category: str | None = None
+    for item_opcode, item_argument in argument:
+        item_name = getattr(item_opcode, "name", str(item_opcode))
+        if item_name == "LITERAL":
+            characters.add(int(item_argument))
+        elif item_name == "RANGE":
+            lower, upper = item_argument
+            if upper - lower > _MAX_WINDOW_REGEX_FIXED_REPEAT:
+                return None
+            characters.update(range(lower, upper + 1))
+        elif item_name == "CATEGORY" and not characters and category is None:
+            category = f"category:{getattr(item_argument, 'name', item_argument)}"
+        else:
+            return None
+    if category is not None:
+        return category if not characters else None
+    return frozenset(characters)
+
+
+def _regex_prefix_character_set(
+    tokens: list[tuple[Any, Any]],
+    *,
+    flags: int,
+) -> _RegexCharacterSet | None:
+    for opcode, argument in tokens:
+        name = getattr(opcode, "name", str(opcode))
+        if name in {"AT", "SUCCESS", "FAILURE"}:
+            continue
+        if name == "SUBPATTERN":
+            _group, add_flags, del_flags, body = argument
+            return _regex_prefix_character_set(
+                body,
+                flags=(flags | add_flags) & ~del_flags,
+            )
+        if name in {"MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"}:
+            minimum, _maximum, body = argument
+            if minimum == 0:
+                return None
+            return _regex_prefix_character_set(body, flags=flags)
+        return _regex_character_set([(opcode, argument)], flags=flags)
+    return None
+
+
+def _character_sets_provably_disjoint(
+    left: _RegexCharacterSet | None,
+    right: _RegexCharacterSet | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    if isinstance(left, frozenset) and isinstance(right, frozenset):
+        return left.isdisjoint(right)
+    if isinstance(left, frozenset) and isinstance(right, str):
+        return all(not _category_matches(right, value) for value in left)
+    if isinstance(left, str) and isinstance(right, frozenset):
+        return all(not _category_matches(left, value) for value in right)
+    assert isinstance(left, str) and isinstance(right, str)
+    pair = frozenset({left.removeprefix("category:"), right.removeprefix("category:")})
+    return pair in {
+        frozenset({"CATEGORY_DIGIT", "CATEGORY_NOT_DIGIT"}),
+        frozenset({"CATEGORY_SPACE", "CATEGORY_NOT_SPACE"}),
+        frozenset({"CATEGORY_WORD", "CATEGORY_NOT_WORD"}),
+        frozenset({"CATEGORY_DIGIT", "CATEGORY_SPACE"}),
+        frozenset({"CATEGORY_DIGIT", "CATEGORY_NOT_WORD"}),
+        frozenset({"CATEGORY_SPACE", "CATEGORY_WORD"}),
+    }
+
+
+def _category_matches(category: str, value: int) -> bool:
+    character = chr(value)
+    name = category.removeprefix("category:")
+    predicates = {
+        "CATEGORY_DIGIT": character.isdecimal(),
+        "CATEGORY_NOT_DIGIT": not character.isdecimal(),
+        "CATEGORY_SPACE": character.isspace(),
+        "CATEGORY_NOT_SPACE": not character.isspace(),
+        "CATEGORY_WORD": character.isalnum() or character == "_",
+        "CATEGORY_NOT_WORD": not (character.isalnum() or character == "_"),
+    }
+    return predicates.get(name, True)
 
 
 class RecordingStartRequest(Schema):

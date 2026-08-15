@@ -14,6 +14,7 @@ from modal_computer_use.models import ActionResult, X11Window
 
 router = APIRouter(prefix="/v1/windows")
 _WINDOW_BACKEND_HEADER = "X-Computer-Use-Window-Backend"
+_MAX_WINDOW_TITLE_LENGTH = 4096
 
 
 @router.get("")
@@ -85,7 +86,8 @@ async def wait_for(
         windows = await backend.windows()
         _report_window_backend(response, getattr(backend, "window_backend", None))
         for window in windows:
-            if pattern and not pattern.search(window.title):
+            candidate_title = window.title[:_MAX_WINDOW_TITLE_LENGTH]
+            if pattern and not pattern.search(candidate_title):
                 continue
             if payload.class_name is not None and window.class_name != payload.class_name:
                 continue

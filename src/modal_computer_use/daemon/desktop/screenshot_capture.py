@@ -24,6 +24,8 @@ from pathlib import Path
 from time import monotonic, perf_counter_ns
 from typing import Any, Literal, cast
 
+from modal_computer_use.daemon.process_environment import desktop_process_environment
+
 from ._x11_shm_worker import (
     CAPTURE_PAYLOAD,
     OP_CAPTURE,
@@ -318,25 +320,28 @@ class _SpawnedX11ScreenshotSession:
                 child_socket.close()
                 child_socket = socket.socket(fileno=duplicated)
                 child_fd = duplicated
+            worker_env = desktop_process_environment(display=display)
+            worker_command = (
+                sys.executable,
+                str(Path(__file__).with_name("_x11_shm_worker.py")),
+                "--fd",
+                str(child_fd),
+                "--display",
+                display,
+                "--width",
+                str(width),
+                "--height",
+                str(height),
+            )
             self._process = subprocess.Popen(  # noqa: S603 - fixed private module argv.
-                [
-                    sys.executable,
-                    str(Path(__file__).with_name("_x11_shm_worker.py")),
-                    "--fd",
-                    str(child_fd),
-                    "--display",
-                    display,
-                    "--width",
-                    str(width),
-                    "--height",
-                    str(height),
-                ],
+                worker_command,
                 close_fds=True,
                 pass_fds=(child_fd,),
                 start_new_session=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=worker_env,
             )
             child_socket.close()
             status, request_id, payload = self._receive(

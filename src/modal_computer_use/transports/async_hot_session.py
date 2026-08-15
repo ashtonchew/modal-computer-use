@@ -19,6 +19,17 @@ from .websocket_url import daemon_websocket_url
 _OPERATION_SEQUENCE_HEADER = "x-computer-use-operation-sequence"
 
 
+def _is_daemon_error(message: dict[str, Any] | None) -> bool:
+    if message is None or message.get("type") != "error":
+        return False
+    error = message.get("error")
+    return bool(
+        isinstance(error, dict)
+        and isinstance(error.get("code"), str)
+        and isinstance(error.get("message"), str)
+    )
+
+
 @dataclass(frozen=True)
 class AsyncHotSessionBinaryResult:
     payload: bytes
@@ -54,6 +65,7 @@ class AsyncHotSessionTransport:
         self._ready = False
         self._closed = False
         self._poisoned = False
+        self._framing_tainted = False
         self._close_task: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> AsyncHotSessionTransport:
@@ -67,6 +79,7 @@ class AsyncHotSessionTransport:
         self._closed = True
         websocket, self._websocket = self._websocket, None
         self._ready = False
+        self._framing_tainted = False
         if websocket is not None:
             await websocket.close()
 
@@ -89,8 +102,8 @@ class AsyncHotSessionTransport:
     ) -> dict[str, Any]:
         async with self._exchange_lock:
             message = await self._exchange(op, payload, metadata=metadata)
-        if message.get("type") == "error":
-            self._raise_hot_error(message)
+            if message.get("type") == "error":
+                self._raise_hot_error(message)
         if message.get("type") != "result":
             raise DaemonHTTPError(
                 "unexpected hot session response",
@@ -149,27 +162,35 @@ class AsyncHotSessionTransport:
             )
         if self._closed:
             raise DaemonHTTPError("hot session is closed", code="hot_session_closed")
-        if self._websocket is not None and self._ready:
+        if self._websocket is not None and self._ready and not self._framing_tainted:
             return self._websocket
         async with self._connect_lock:
+            if self._websocket is not None and self._framing_tainted:
+                await self._discard_connection()
             if self._websocket is None:
                 self._websocket = await self._connect()
             if not self._ready:
                 try:
                     ready = await asyncio.wait_for(self._websocket.recv(), timeout=self.timeout)
                 except ConnectionClosed as exc:
+                    await self._discard_connection()
                     if (
                         getattr(exc, "rcvd", None) is not None
                         and getattr(exc.rcvd, "code", None) == 1008
                     ):
                         raise AuthenticationError("hot session authentication failed") from exc
                     raise
+                except BaseException:
+                    await self._discard_connection()
+                    raise
                 if not isinstance(ready, str):
+                    await self._discard_connection()
                     raise DaemonHTTPError(
                         "hot session did not return a ready frame",
                         code="hot_session_failed",
                     )
                 self._ready = True
+                self._framing_tainted = False
         assert self._websocket is not None
         return self._websocket
 
@@ -201,13 +222,14 @@ class AsyncHotSessionTransport:
         websocket = await self._ensure_connected()
         request_id = str(next(self._ids))
         mutating = op in self._MUTATING_OPS
-        possibly_sent = False
+        sent = False
         try:
-            possibly_sent = mutating
             message = {"id": request_id, "op": op, "payload": payload}
             if metadata is not None and _OPERATION_SEQUENCE_HEADER in metadata:
                 message["sequence"] = metadata[_OPERATION_SEQUENCE_HEADER]
-            await websocket.send(json.dumps(message))
+            encoded = json.dumps(message)
+            sent = True
+            await websocket.send(encoded)
             raw = await asyncio.wait_for(websocket.recv(), timeout=self.timeout)
             if not isinstance(raw, str):
                 raise DaemonHTTPError(
@@ -220,6 +242,14 @@ class AsyncHotSessionTransport:
                     "unexpected hot session response id",
                     code="hot_session_protocol_error",
                 )
+            if data.get("type") == "error" and not _is_daemon_error(data):
+                self._raise_hot_error(data)
+            expected_type = "binary" if receive_binary else "result"
+            if data.get("type") not in {"error", expected_type}:
+                raise DaemonHTTPError(
+                    "unexpected hot session response",
+                    code="hot_session_protocol_error",
+                )
             if receive_binary and data.get("type") == "binary":
                 frame = await asyncio.wait_for(websocket.recv(), timeout=self.timeout)
                 if not isinstance(frame, bytes):
@@ -230,16 +260,25 @@ class AsyncHotSessionTransport:
                 data["_binary_payload"] = frame
             return data
         except asyncio.CancelledError:
-            if possibly_sent:
-                await self._poison_and_close()
+            if sent:
+                if mutating:
+                    await self._poison_and_close()
+                else:
+                    await self._taint_and_close()
             raise
         except Exception:
-            if possibly_sent:
-                await self._poison_and_close()
+            if sent:
+                if mutating:
+                    await self._poison_and_close()
+                else:
+                    await self._taint_and_close()
             raise
 
-    async def _poison_and_close(self) -> None:
-        self._poisoned = True
+    async def _taint_and_close(self) -> None:
+        await self._discard_connection()
+
+    async def _discard_connection(self) -> None:
+        self._framing_tainted = True
         websocket, self._websocket = self._websocket, None
         self._ready = False
         if websocket is None:
@@ -248,6 +287,10 @@ class AsyncHotSessionTransport:
         self._close_task = close_task
         with suppress(asyncio.CancelledError, Exception):
             await asyncio.shield(close_task)
+
+    async def _poison_and_close(self) -> None:
+        self._poisoned = True
+        await self._discard_connection()
 
     @staticmethod
     def _raise_hot_error(message: dict[str, Any]) -> None:

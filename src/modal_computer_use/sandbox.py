@@ -21,6 +21,7 @@ from ._version import __version__
 from .borrowed import AsyncBorrowedComputer, BorrowedComputer
 from .client import AsyncDaemonClient, DaemonClient
 from .config import ComputerConfig, ModalIngress, normalize_vnc_mode
+from .daemon.process_environment import daemon_process_command
 from .errors import (
     BrowserReadinessError,
     ConfigConflictError,
@@ -1656,7 +1657,12 @@ class ComputerSandbox:
         timeout: float = 30.0,
     ) -> ComputerSandbox:
         return cls(
-            DaemonClient(base_url=base_url, token=token, timeout=timeout),
+            DaemonClient(
+                base_url=base_url,
+                token=token,
+                timeout=timeout,
+                _owner_proof=token,
+            ),
             _lifecycle_mode="local",
         )
 
@@ -1770,9 +1776,12 @@ class ComputerSandbox:
         computer: ComputerSandbox | None = None
         try:
             sandbox = modal.Sandbox.create(
-                "python",
-                "-m",
-                "modal_computer_use.daemon",
+                *daemon_process_command(
+                    "python",
+                    "-m",
+                    "modal_computer_use.daemon",
+                    managed_image=not plan.inputs.custom_image_supplied,
+                ),
                 **_materialize_sandbox_create_kwargs(plan),
             )
             config = plan.inputs.config
@@ -1814,6 +1823,7 @@ class ComputerSandbox:
                     token=token,
                     http2=plan.http2,
                     _token_resolver=token_resolver,
+                    _owner_proof=plan.daemon_bearer,
                 ),
                 sandbox=sandbox,
                 metadata=metadata,
@@ -1831,7 +1841,12 @@ class ComputerSandbox:
                     connect_token=connect_token,
                 )
                 computer = cls(
-                    DaemonClient(base_url=base_url, token=token, http2=plan.http2),
+                    DaemonClient(
+                        base_url=base_url,
+                        token=token,
+                        http2=plan.http2,
+                        _owner_proof=plan.daemon_bearer,
+                    ),
                     sandbox=sandbox,
                     metadata=metadata,
                     _lifecycle_mode="owned",
@@ -2170,7 +2185,7 @@ class ComputerSandbox:
     def recovery_status(self) -> SessionRecoveryStatus:
         """Return durable target recovery state using owner-only authorization."""
         bearer = self._daemon_bearer
-        if not bearer:
+        if self._lifecycle_mode != "owned" or not bearer:
             raise SandboxUnavailableError(
                 "owner recovery requires the original SDK-owned daemon authorization"
             )
@@ -2190,7 +2205,7 @@ class ComputerSandbox:
         if not isinstance(incident_id, str) or not incident_id.strip():
             raise ValueError("incident_id must be a non-empty string")
         bearer = self._daemon_bearer
-        if not bearer:
+        if self._lifecycle_mode != "owned" or not bearer:
             raise SandboxUnavailableError(
                 "owner recovery requires the original SDK-owned daemon authorization"
             )
@@ -2520,6 +2535,7 @@ class AsyncComputerSandbox:
         sandbox: object,
         metadata: SandboxRef,
         lifecycle_mode: Literal["owned", "attached"],
+        daemon_bearer: str | None = None,
         startup_timing: SessionStartupTiming | None = None,
         session_handoff_policy: _SessionHandoffPolicy | None = None,
     ) -> None:
@@ -2527,6 +2543,9 @@ class AsyncComputerSandbox:
         self._sandbox: object | None = sandbox
         self._metadata = metadata
         self._lifecycle_mode: _SandboxLifecycleMode = lifecycle_mode
+        # This is an owner-only recovery credential.  Attached objects must
+        # never retain the bootstrap bearer they used to connect.
+        self._daemon_bearer = daemon_bearer if lifecycle_mode == "owned" else None
         self._lifecycle_lock = asyncio.Lock()
         self.startup_timing = startup_timing
         self._session_handoff_policy = session_handoff_policy
@@ -2708,6 +2727,41 @@ class AsyncComputerSandbox:
             policy=self._session_handoff_policy,
         )
 
+    async def recovery_status(self) -> SessionRecoveryStatus:
+        """Return durable target recovery state using owner-only authorization."""
+        bearer = self._daemon_bearer
+        if self._lifecycle_mode != "owned" or not bearer:
+            raise SandboxUnavailableError(
+                "owner recovery requires the original SDK-owned daemon authorization"
+            )
+        response = await self.client.transport.request(
+            "GET",
+            "/v1/recovery/status",
+            headers={"x-computer-use-owner-proof": bearer},
+        )
+        return SessionRecoveryStatus.model_validate(response.json())
+
+    async def acknowledge_recovery(
+        self,
+        *,
+        incident_id: str,
+    ) -> SessionRecoveryAcknowledgement:
+        """Acknowledge one exact recovery incident as the original owner."""
+        if not isinstance(incident_id, str) or not incident_id.strip():
+            raise ValueError("incident_id must be a non-empty string")
+        bearer = self._daemon_bearer
+        if self._lifecycle_mode != "owned" or not bearer:
+            raise SandboxUnavailableError(
+                "owner recovery requires the original SDK-owned daemon authorization"
+            )
+        response = await self.client.transport.request(
+            "POST",
+            "/v1/recovery/acknowledge",
+            json={"incident_id": incident_id},
+            headers={"x-computer-use-owner-proof": bearer},
+        )
+        return SessionRecoveryAcknowledgement.model_validate(response.json())
+
     async def runtime_placement(self) -> dict[str, str | None]:
         """Return the cloud and region observed inside the Modal Sandbox."""
         sandbox = self._sandbox
@@ -2735,6 +2789,17 @@ class AsyncComputerSandbox:
 
     def observation_stream(self, **kwargs: Any) -> AsyncObservationClient:
         return self.client.observation_stream(**kwargs)
+
+    async def debug_urls(self) -> DebugUrls:
+        """Return debug URLs without fabricating a VNC endpoint for attachments."""
+        sandbox = self._sandbox
+        if sandbox is not None:
+            return DebugUrls(
+                vnc=await _vnc_url_async(sandbox),
+                daemon=None,
+                recording_dashboard=None,
+            )
+        return await self.debug.urls()
 
 
 class _AsyncComputerSandboxContext:
@@ -2839,9 +2904,12 @@ async def _create_async_computer_sandbox(
     startup_timing.mark("sandbox_create_started")
     sandbox = await _allocate_modal_sandbox_async(
         modal.Sandbox.create.aio(
-            "python",
-            "-m",
-            "modal_computer_use.daemon",
+            *daemon_process_command(
+                "python",
+                "-m",
+                "modal_computer_use.daemon",
+                managed_image=not plan.inputs.custom_image_supplied,
+            ),
             **_materialize_sandbox_create_kwargs(plan),
         )
     )
@@ -2871,6 +2939,7 @@ async def _create_async_computer_sandbox(
             sandbox=sandbox,
             metadata=metadata,
             lifecycle_mode="owned",
+            daemon_bearer=plan.daemon_bearer,
             startup_timing=startup_timing,
             session_handoff_policy=session_policy,
         )
@@ -3328,7 +3397,12 @@ async def _async_daemon_client_for_sandbox(
         if timing is not None:
             timing.mark("connection_parameters_ready")
 
-    client = AsyncDaemonClient(base_url, token=token, http2=http2)
+    client = AsyncDaemonClient(
+        base_url,
+        token=token,
+        http2=http2,
+        _owner_proof=daemon_bearer,
+    )
     try:
         await client.wait_until_ready(timeout=readiness_timeout)
         if timing is not None:
@@ -3350,6 +3424,7 @@ async def _async_daemon_client_for_sandbox(
             await _tunnel_url_async(sandbox, 8080),
             token=attested_token,
             http2=http2,
+            _owner_proof=daemon_bearer,
         )
         try:
             await final_client.wait_until_ready(timeout=readiness_timeout)
@@ -3471,6 +3546,7 @@ async def _close_async_computer_context(
         if not any(name == "sandbox.detach.aio" for name, _error in errors):
             computer._sandbox = None
             computer._lifecycle_mode = "detached"
+            computer._daemon_bearer = None
         if primary is not None:
             for operation_name, cleanup_exc in errors:
                 _note_cleanup_failure(primary, operation_name, cleanup_exc)
@@ -3508,6 +3584,7 @@ async def _detach_async_computer(computer: AsyncComputerSandbox) -> None:
 
         computer._sandbox = None
         computer._lifecycle_mode = "detached"
+        computer._daemon_bearer = None
         close_errors, close_cancellation = await _collect_async_cleanup(
             [("client.aclose", computer.client.aclose)]
         )
@@ -3758,7 +3835,8 @@ def create_modal_benchmark_computer(
     if not config.run_id:
         config.run_id = new_run_id()
     browser_kind = config.browser.kind if config.browser else None
-    if image is None:
+    managed_image = image is None
+    if managed_image:
         image = named_image(
             revision=config.image.revision or "",
             profile=config.resources.profile,
@@ -3824,7 +3902,15 @@ def create_modal_benchmark_computer(
         create = runtime.Sandbox.create
 
     timing.mark("sandbox_create_started")
-    sandbox = create("python", "-m", "modal_computer_use.daemon", **create_kwargs)
+    sandbox = create(
+        *daemon_process_command(
+            "python",
+            "-m",
+            "modal_computer_use.daemon",
+            managed_image=managed_image,
+        ),
+        **create_kwargs,
+    )
     timing.mark("sandbox_registered")
     client: DaemonClient | None = None
     try:
@@ -4314,10 +4400,10 @@ def _daemon_environment(
 
 
 def _has_artifact_volume_mount(volumes: dict[str, object], artifacts_dir: str) -> bool:
-    artifact_path = _normalize_mount_path(artifacts_dir)
+    artifact_path = PurePosixPath(_normalize_mount_path(artifacts_dir))
     for mount_path in volumes:
-        mount = _normalize_mount_path(str(mount_path))
-        if artifact_path == mount or artifact_path.startswith(f"{mount}/"):
+        mount = PurePosixPath(_normalize_mount_path(str(mount_path)))
+        if artifact_path == mount or mount in artifact_path.parents:
             return True
     return False
 
@@ -4965,6 +5051,18 @@ def _reject_security_owned_sandbox_kwargs(sandbox_kwargs: Mapping[str, object]) 
 def _vnc_url(sandbox: object) -> str | None:
     try:
         tunnels = sandbox.tunnels()
+    except Exception:
+        return None
+    tunnel = tunnels.get(6080) if isinstance(tunnels, dict) else None
+    if tunnel is None:
+        return None
+    return str(getattr(tunnel, "url", None) or getattr(tunnel, "tcp_socket", None) or "")
+
+
+async def _vnc_url_async(sandbox: object) -> str | None:
+    """Resolve the Modal noVNC tunnel without touching daemon debug routes."""
+    try:
+        tunnels = await sandbox.tunnels.aio()
     except Exception:
         return None
     tunnel = tunnels.get(6080) if isinstance(tunnels, dict) else None

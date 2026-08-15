@@ -16,7 +16,7 @@ Use Python 3.12 or later and `uv`. Install the Modal extra from PyPI:
 uv add "modal-computer-use[modal]"
 ```
 
-The Modal extra supports the Modal 1.5 line and requires Modal 1.5.2 or later.
+The Modal extra supports the Modal 1.5 line and requires Modal 1.5.3 or later.
 
 Save this as `quickstart.py`. Choose one exact Modal region for both the Function and the Sandbox.
 The resource values are application choices, not SDK defaults.

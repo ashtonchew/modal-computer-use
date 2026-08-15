@@ -36,7 +36,10 @@ from modal_computer_use.daemon.desktop.screenshots import (
 )
 from modal_computer_use.daemon.desktop.windows import X11WindowController
 from modal_computer_use.daemon.desktop.xtest import X11InputSession
-from modal_computer_use.daemon.process_environment import desktop_process_environment
+from modal_computer_use.daemon.process_environment import (
+    desktop_process_command,
+    desktop_process_environment,
+)
 from modal_computer_use.models import (
     ActionResult,
     CoordinateSpace,
@@ -800,7 +803,7 @@ class X11DesktopBackend(MockDesktopBackend):
     ) -> subprocess.CompletedProcess[str]:
         env = desktop_process_environment(display=self.display)
         return await self._process_runner.run(
-            *args,
+            *desktop_process_command(*args, environ=env),
             env=env,
             timeout=timeout,
             input_text=input_text,
@@ -811,7 +814,7 @@ class X11DesktopBackend(MockDesktopBackend):
     async def _spawn(self, *args: str) -> subprocess.Popen[str]:
         env = desktop_process_environment(display=self.display)
         return subprocess.Popen(  # noqa: S603 - daemon validates command shape before launch.
-            args,
+            desktop_process_command(*args, environ=env),
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -826,7 +829,13 @@ class X11DesktopBackend(MockDesktopBackend):
         if xclip is None:
             raise FileNotFoundError("xclip is required for clipboard ownership")
         process = subprocess.Popen(  # noqa: S603 - executable resolved through PATH.
-            (xclip, "-selection", "clipboard", "-silent"),
+            desktop_process_command(
+                xclip,
+                "-selection",
+                "clipboard",
+                "-silent",
+                environ=env,
+            ),
             env=env,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,

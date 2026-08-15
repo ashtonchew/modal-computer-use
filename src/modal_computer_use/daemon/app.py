@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import time
 from collections import OrderedDict
@@ -12,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from modal_computer_use import __version__
+from modal_computer_use._version import __version__
 from modal_computer_use.artifacts import ArtifactStore
 from modal_computer_use.daemon.auth import AuthMiddleware
 from modal_computer_use.daemon.budget_policy import BudgetPolicy
@@ -31,6 +30,7 @@ from modal_computer_use.daemon.errors import DaemonError, public_input_error
 from modal_computer_use.daemon.input_rate_limit import InputTokenBucket
 from modal_computer_use.daemon.leases import LeaseCoordinator
 from modal_computer_use.daemon.logging import configure_logging
+from modal_computer_use.daemon.openapi import openapi_schema
 from modal_computer_use.daemon.readiness import ReadinessCache
 from modal_computer_use.daemon.receipts import ReceiptJournal
 from modal_computer_use.daemon.request_limits import (
@@ -109,48 +109,91 @@ async def _startup_readiness(app: FastAPI) -> tuple[bool, list[str]]:
         return False, [f"startup readiness probe failed: {type(exc).__name__}"]
 
 
+async def _cancel_startup_tasks(tasks: list[asyncio.Task[object]]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _shutdown_lifespan_resources(app: FastAPI) -> BaseException | None:
+    """Close every lifespan resource while retaining the first cleanup error."""
+
+    first_error: BaseException | None = None
+
+    lease_expiry_task = app.state.lease_expiry_task
+    if lease_expiry_task is not None:
+        lease_expiry_task.cancel()
+        try:
+            await lease_expiry_task
+        except asyncio.CancelledError:
+            pass
+        except BaseException as exc:
+            first_error = exc
+
+    async def attempt(operation) -> None:
+        nonlocal first_error
+        try:
+            await operation()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+
+    await attempt(lambda: asyncio.to_thread(app.state.recordings.shutdown))
+    await attempt(lambda: _close_backend(app))
+    await attempt(app.state.supervisor.stop)
+    await attempt(app.state.receipt_journal.close)
+    return first_error
+
+
+async def _close_backend(app: FastAPI) -> None:
+    app.state.backend.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     supervisor: Supervisor = app.state.supervisor
-    await app.state.receipt_journal.start()
-    await supervisor.start()
-    app.state.browser_prewarm = None
-    recovery_status = await app.state.receipt_journal.recovery_status()
-    startup_configured = bool(
-        app.state.settings.browser_open_url_on_start or app.state.settings.browser_prewarm
-    )
-    if startup_configured:
-        readiness_task = asyncio.create_task(_startup_readiness(app))
-        browser_task = asyncio.create_task(_startup_browser(app, recovery_status))
-        readiness, app.state.browser_prewarm = await asyncio.gather(
-            readiness_task,
-            browser_task,
-        )
-        if readiness[0]:
-            # The cache records the backend's current readiness generation. This
-            # explicit seed keeps startup and the first /readyz request on the
-            # same generation-aware snapshot.
-            mark_desktop_ready(app.state)
-    else:
-        app.state.browser_prewarm = await _startup_browser(app, recovery_status)
+    primary_error: BaseException | None = None
     try:
-        yield
-    finally:
-        try:
-            lease_expiry_task = app.state.lease_expiry_task
-            if lease_expiry_task is not None:
-                lease_expiry_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await lease_expiry_task
+        await app.state.receipt_journal.start()
+        await supervisor.start()
+        app.state.browser_prewarm = None
+        recovery_status = await app.state.receipt_journal.recovery_status()
+        startup_configured = bool(
+            app.state.settings.browser_open_url_on_start or app.state.settings.browser_prewarm
+        )
+        if startup_configured:
+            readiness_task = asyncio.create_task(_startup_readiness(app))
+            browser_task = asyncio.create_task(_startup_browser(app, recovery_status))
+            startup_tasks: list[asyncio.Task[object]] = [readiness_task, browser_task]
             try:
-                await asyncio.to_thread(app.state.recordings.shutdown)
+                readiness, app.state.browser_prewarm = await asyncio.gather(
+                    readiness_task,
+                    browser_task,
+                )
             finally:
-                try:
-                    app.state.backend.close()
-                finally:
-                    await supervisor.stop()
-        finally:
-            await app.state.receipt_journal.close()
+                await _cancel_startup_tasks(startup_tasks)
+            if readiness[0]:
+                # The cache records the backend's current readiness generation. This
+                # explicit seed keeps startup and the first /readyz request on the
+                # same generation-aware snapshot.
+                mark_desktop_ready(app.state)
+        else:
+            app.state.browser_prewarm = await _startup_browser(app, recovery_status)
+        yield
+    except BaseException as exc:
+        primary_error = exc
+        raise
+    finally:
+        cleanup_error = await _shutdown_lifespan_resources(app)
+        if cleanup_error is not None:
+            if primary_error is not None:
+                primary_error.add_note(
+                    "lifespan cleanup also failed: " f"{type(cleanup_error).__name__}"
+                )
+            else:
+                raise cleanup_error
 
 
 def create_app(settings: DaemonSettings | None = None) -> FastAPI:
@@ -397,6 +440,8 @@ def create_app(settings: DaemonSettings | None = None) -> FastAPI:
         recordings.dashboard_router,
     ):
         app.include_router(router)
+
+    app.openapi = lambda: openapi_schema(app)
     return app
 
 

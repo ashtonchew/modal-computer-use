@@ -100,6 +100,94 @@
         "title": "ActionBatchRequest",
         "type": "object"
       },
+      "ActionBatchRequestWithoutIdempotency": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ComputerAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "continue_on_error": {
+            "default": false,
+            "description": "Continue after failed top-level actions. Compound actions such as hold_key remain atomic; their nested actions stop on the first failure.",
+            "title": "Continue On Error",
+            "type": "boolean"
+          },
+          "max_action_timeout_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Action Timeout Ms"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "screenshot_after": {
+            "default": false,
+            "title": "Screenshot After",
+            "type": "boolean"
+          },
+          "screenshot_options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScreenshotOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence"
+          },
+          "source": {
+            "default": "sdk",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "title": "ActionBatchRequestWithoutIdempotency",
+        "type": "object"
+      },
       "ActionBatchResult": {
         "additionalProperties": false,
         "properties": {
@@ -402,6 +490,167 @@
           "actions"
         ],
         "title": "ActionObserveChangeScreenshotRequest",
+        "type": "object"
+      },
+      "ActionObserveChangeScreenshotRequestWithoutIdempotency": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ComputerAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "capture_delay_ms": {
+            "default": 0,
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Capture Delay Ms",
+            "type": "integer"
+          },
+          "change_detection": {
+            "default": "full",
+            "enum": [
+              "full",
+              "region",
+              "auto_region"
+            ],
+            "title": "Change Detection",
+            "type": "string"
+          },
+          "change_detection_region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Region"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "change_region_radius": {
+            "default": 192,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Change Region Radius",
+            "type": "integer"
+          },
+          "change_signal": {
+            "default": "auto",
+            "enum": [
+              "poll",
+              "xdamage",
+              "auto"
+            ],
+            "title": "Change Signal",
+            "type": "string"
+          },
+          "change_timeout_ms": {
+            "default": 100,
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Change Timeout Ms",
+            "type": "integer"
+          },
+          "continue_on_error": {
+            "default": false,
+            "description": "Continue after failed top-level actions. Compound actions such as hold_key remain atomic; their nested actions stop on the first failure.",
+            "title": "Continue On Error",
+            "type": "boolean"
+          },
+          "max_action_timeout_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Action Timeout Ms"
+          },
+          "poll_interval_ms": {
+            "default": 8,
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Poll Interval Ms",
+            "type": "integer"
+          },
+          "poll_strategy": {
+            "default": "fixed",
+            "enum": [
+              "fixed",
+              "adaptive"
+            ],
+            "title": "Poll Strategy",
+            "type": "string"
+          },
+          "previous_source_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Source Sha256"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "screenshot_after": {
+            "default": false,
+            "title": "Screenshot After",
+            "type": "boolean"
+          },
+          "screenshot_options": {
+            "$ref": "#/components/schemas/ScreenshotOptions"
+          },
+          "sequence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence"
+          },
+          "source": {
+            "default": "sdk",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "title": "ActionObserveChangeScreenshotRequestWithoutIdempotency",
         "type": "object"
       },
       "ActionResult": {
@@ -1128,6 +1377,31 @@
         "title": "CursorPositionAction",
         "type": "object"
       },
+      "DaemonErrorResponse": {
+        "additionalProperties": false,
+        "description": "Structured error envelope emitted by every daemon validation/failure path.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DaemonErrorResponse",
+        "type": "object"
+      },
       "DebugUrls": {
         "additionalProperties": false,
         "properties": {
@@ -1470,19 +1744,6 @@
           }
         },
         "title": "DragAction",
-        "type": "object"
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "title": "HTTPValidationError",
         "type": "object"
       },
       "HoldKeyAction": {
@@ -3605,46 +3866,6 @@
         "title": "TypeRequest",
         "type": "object"
       },
-      "ValidationError": {
-        "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Location",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Message",
-            "type": "string"
-          },
-          "type": {
-            "title": "Error Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError",
-        "type": "object"
-      },
       "ValidationResult": {
         "additionalProperties": false,
         "properties": {
@@ -4020,6 +4241,13 @@
         "title": "ZoomScreenshotRequest",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "description": "Daemon bearer or tunnel token. Modal Connect requests use the authenticated proxy.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -4093,6 +4321,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Dashboard"
       }
     },
@@ -4142,13 +4375,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Run"
       }
     },
@@ -4156,29 +4394,11 @@
       "post": {
         "description": "Runs one ordered action batch. Then it returns the first frame whose full-resolution pixels differ from the pre-action baseline. XDamage can wake the verifier, and pixel polling remains the fallback. This result does not establish application readiness, visual stability, or task completion.",
         "operationId": "run_observe_change_raw_screenshot_v1_actions_run_observe_change_raw_screenshot_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ActionObserveChangeScreenshotRequest"
+                "$ref": "#/components/schemas/ActionObserveChangeScreenshotRequestWithoutIdempotency"
               }
             }
           },
@@ -4194,48 +4414,123 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-action-result": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-change-result": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-change-timing-ms": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Experimental: run actions and observe the first visual change"
       }
     },
     "/v1/actions/run/raw-screenshot": {
       "post": {
         "operationId": "run_raw_screenshot_v1_actions_run_raw_screenshot_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ActionBatchRequest"
+                "$ref": "#/components/schemas/ActionBatchRequestWithoutIdempotency"
               }
             }
           },
@@ -4251,19 +4546,100 @@
               "image/png": {},
               "image/webp": {}
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "x-computer-use-action-result": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-capture-backend": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-captured-at": {
+                "required": true,
+                "schema": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-coordinate-space": {
+                "description": "JSON-encoded coordinate-space metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-position": {
+                "description": "JSON-encoded cursor point, or null when it was not captured.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-cursor-visible": {
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              },
+              "x-computer-use-height": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-sha256": {
+                "required": true,
+                "schema": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                }
+              },
+              "x-computer-use-size-bytes": {
+                "required": true,
+                "schema": {
+                  "minimum": 0.0,
+                  "type": "integer"
+                }
+              },
+              "x-computer-use-timing-ms": {
+                "description": "JSON-encoded daemon timing metadata.",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-computer-use-width": {
+                "required": true,
+                "schema": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Run Raw Screenshot"
       }
     },
@@ -4295,13 +4671,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Validate"
       }
     },
@@ -4333,13 +4714,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Launch"
       }
     },
@@ -4371,13 +4757,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Open Artifact"
       }
     },
@@ -4415,13 +4806,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "List Artifacts"
       }
     },
@@ -4459,13 +4855,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Manifest"
       }
     },
@@ -4484,6 +4885,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Sync"
       }
     },
@@ -4520,13 +4926,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Delete Artifact"
       },
       "get": {
@@ -4555,13 +4966,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Read Artifact"
       },
       "put": {
@@ -4592,13 +5008,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Write Artifact"
       }
     },
@@ -4630,13 +5051,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Open Url"
       }
     },
@@ -4670,13 +5096,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Render Metrics"
       }
     },
@@ -4697,6 +5128,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Status"
       }
     },
@@ -4715,6 +5151,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Capabilities"
       }
     },
@@ -4733,6 +5174,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Clear Text"
       },
       "get": {
@@ -4753,6 +5199,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Get Text"
       },
       "put": {
@@ -4782,13 +5233,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Set Text"
       }
     },
@@ -4820,13 +5276,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Run"
       }
     },
@@ -4845,6 +5306,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Restart"
       }
     },
@@ -4863,6 +5329,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Start"
       }
     },
@@ -4881,6 +5352,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Status"
       }
     },
@@ -4899,6 +5375,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Stop"
       }
     },
@@ -4917,6 +5398,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Urls"
       }
     },
@@ -4935,6 +5421,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Info"
       }
     },
@@ -4953,6 +5444,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Release All"
       }
     },
@@ -4984,13 +5480,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Hold"
       }
     },
@@ -5022,13 +5523,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Hotkey"
       }
     },
@@ -5051,6 +5557,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Supported Keys"
       }
     },
@@ -5082,13 +5593,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Press"
       }
     },
@@ -5120,13 +5636,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Keyboard Type"
       }
     },
@@ -5158,13 +5679,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Click"
       }
     },
@@ -5196,13 +5722,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Down"
       }
     },
@@ -5234,13 +5765,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Drag"
       }
     },
@@ -5272,13 +5808,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Move"
       }
     },
@@ -5297,6 +5838,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Position"
       }
     },
@@ -5328,13 +5874,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Scroll"
       }
     },
@@ -5366,13 +5917,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Up"
       }
     },
@@ -5402,13 +5958,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Observation Transport Probe"
       }
     },
@@ -5451,13 +6012,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Process Errors"
       }
     },
@@ -5500,13 +6066,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Process Logs"
       }
     },
@@ -5542,13 +6113,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Process Restart"
       }
     },
@@ -5581,13 +6157,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Process Status"
       }
     },
@@ -5630,13 +6211,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Process Stderr"
       }
     },
@@ -5659,6 +6245,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "List Recordings"
       },
       "post": {
@@ -5688,13 +6279,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Start"
       }
     },
@@ -5731,13 +6327,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Delete"
       },
       "get": {
@@ -5768,13 +6369,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Get"
       }
     },
@@ -5805,13 +6411,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Download"
       }
     },
@@ -5844,13 +6455,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Stop"
       }
     },
@@ -5882,13 +6498,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Full"
       }
     },
@@ -5991,13 +6612,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Full Raw"
       }
     },
@@ -6029,13 +6655,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Region"
       }
     },
@@ -6138,13 +6769,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Region Raw"
       }
     },
@@ -6176,13 +6812,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Zoom"
       }
     },
@@ -6285,13 +6926,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Zoom Raw"
       }
     },
@@ -6310,6 +6956,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Metadata"
       }
     },
@@ -6328,6 +6979,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Refresh"
       }
     },
@@ -6348,6 +7004,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Tunnel Authorize"
       }
     },
@@ -6376,13 +7037,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Step"
       }
     },
@@ -6401,6 +7067,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Version"
       }
     },
@@ -6423,6 +7094,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "List Windows"
       }
     },
@@ -6449,6 +7125,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Active"
       }
     },
@@ -6480,13 +7161,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Wait For"
       }
     },
@@ -6519,13 +7205,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Activate"
       }
     },
@@ -6558,13 +7249,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/DaemonErrorResponse"
                 }
               }
             },
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "Close"
       }
     }

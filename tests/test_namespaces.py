@@ -122,7 +122,6 @@ def test_actions_namespace_run_and_screenshot_bytes_uses_raw_endpoint() -> None:
 
     result = namespace.run_and_screenshot_bytes(
         [{"type": "move", "x": 1, "y": 2}],
-        idempotency_key="idem",
         call_id="call_test",
     )
 
@@ -131,7 +130,7 @@ def test_actions_namespace_run_and_screenshot_bytes_uses_raw_endpoint() -> None:
     assert result.height == 768
     assert result.result.call_id == "call_test"
     assert client.posts[0]["path"] == "/v1/actions/run/raw-screenshot"
-    assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
+    assert client.posts[0]["headers"] is None
     assert client.posts[0]["json"]["screenshot_after"] is True
 
 
@@ -148,7 +147,6 @@ def test_actions_namespace_run_and_observe_change_screenshot_bytes_uses_fast_pat
         change_detection="auto_region",
         change_region_radius=64,
         change_signal="poll",
-        idempotency_key="idem",
         call_id="call_test",
     )
 
@@ -159,7 +157,7 @@ def test_actions_namespace_run_and_observe_change_screenshot_bytes_uses_fast_pat
     assert result.change_result == {"detected": True, "attempts": 1}
     assert result.change_timing_ms == {"total_ms": 12.5}
     assert client.posts[0]["path"] == "/v1/actions/run/observe-change/raw-screenshot"
-    assert client.posts[0]["headers"] == {"Idempotency-Key": "idem"}
+    assert client.posts[0]["headers"] is None
     assert client.posts[0]["json"]["screenshot_after"] is False
     assert client.posts[0]["json"]["previous_source_sha256"] == "a" * 64
     assert client.posts[0]["json"]["change_timeout_ms"] == 25

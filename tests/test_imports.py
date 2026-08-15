@@ -17,6 +17,27 @@ def test_core_import_does_not_import_providers() -> None:
     assert "anthropic" not in sys.modules
 
 
+def test_daemon_app_import_does_not_load_modal_orchestration_modules() -> None:
+    code = """
+import sys
+
+import modal_computer_use.daemon.app
+
+unexpected = {
+    "modal_computer_use.image",
+    "modal_computer_use.manager",
+    "modal_computer_use.registry",
+    "modal_computer_use.sandbox",
+}.intersection(sys.modules)
+assert not unexpected, sorted(unexpected)
+"""
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_root_package_exports_are_unique_and_importable() -> None:
     import modal_computer_use
 

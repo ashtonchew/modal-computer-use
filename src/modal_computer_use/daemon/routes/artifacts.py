@@ -98,30 +98,27 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                     _reject_active_recording_target(request, public_path)
                     budget_policy(request).enforce_artifact_write(public_path, total)
                     store._enforce_write_budget(target, total)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    store._reject_symlink_components(public_path)
                     manifest_existed = store.manifest_path.exists()
                     manifest_size = (
                         store.manifest_path.stat().st_size if manifest_existed else 0
                     )
-                    backup_path = _backup_existing_target(target, temp_dir=temp_dir)
+                    commit = None
                     try:
-                        temp_path.replace(target)
-                        info = store._info(
-                            target,
-                            public_path=public_path,
-                            known_size_bytes=total,
-                            known_sha256=content_digest.hexdigest(),
+                        commit = store.commit_staged_upload(
+                            temp_path,
+                            public_path,
+                            size_bytes=total,
+                            sha256=content_digest.hexdigest(),
                         )
+                        info = commit.info
                         content_type = request.headers.get("content-type")
                         if content_type:
                             info.content_type = content_type
                         store.append_manifest(info)
                         budget_policy(request).enforce("artifacts")
                     except Exception:
-                        target.unlink(missing_ok=True)
-                        if backup_path is not None:
-                            backup_path.replace(target)
+                        if commit is not None:
+                            commit.rollback()
                         _restore_manifest(
                             store.manifest_path,
                             existed=manifest_existed,
@@ -129,8 +126,8 @@ async def write_artifact(path: str, request: Request) -> ArtifactInfo:
                         )
                         raise
                     else:
-                        if backup_path is not None:
-                            backup_path.unlink(missing_ok=True)
+                        assert commit is not None
+                        commit.finalize()
                         budget_policy(request).touch_activity()
                         return info
             finally:
@@ -153,16 +150,6 @@ def _ensure_writable_artifact_target(target: Path) -> None:
             status_code=409,
             code="artifact_path_conflict",
         )
-
-
-def _backup_existing_target(target: Path, *, temp_dir: Path) -> Path | None:
-    if not target.exists():
-        return None
-    with tempfile.NamedTemporaryFile(dir=temp_dir, delete=False) as handle:
-        backup_path = Path(handle.name)
-    backup_path.unlink()
-    target.replace(backup_path)
-    return backup_path
 
 
 def _restore_manifest(path: Path, *, existed: bool, size: int) -> None:

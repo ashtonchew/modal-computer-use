@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -26,7 +26,29 @@ def _optional_int_env(name: str) -> int | None:
 
 
 def _path_env(name: str, default: str) -> Path:
-    return Path(os.getenv(name, default))
+    return _validated_path(name, os.getenv(name, default))
+
+
+def _validated_path(name: str, value: str | os.PathLike[str]) -> Path:
+    """Validate one daemon storage/runtime path before it reaches the filesystem."""
+    try:
+        value_string = os.fspath(value)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be an absolute normalized POSIX path") from exc
+    if not isinstance(value_string, str):
+        raise ValueError(f"{name} must be an absolute normalized POSIX path")
+    if not value_string or value_string != value_string.strip():
+        raise ValueError(f"{name} must be an absolute normalized POSIX path")
+    if "\x00" in value_string or "\\" in value_string:
+        raise ValueError(f"{name} must be an absolute normalized POSIX path")
+    if not value_string.startswith("/") or value_string.startswith("//"):
+        raise ValueError(f"{name} must be an absolute normalized POSIX path")
+    path = PurePosixPath(value_string)
+    if any(part in {".", ".."} for part in path.parts):
+        raise ValueError(f"{name} must not contain dot components")
+    if path.as_posix() != value_string:
+        raise ValueError(f"{name} must be an absolute normalized POSIX path")
+    return Path(value_string)
 
 
 def _json_list_env(name: str) -> list[str]:
@@ -222,6 +244,13 @@ class DaemonSettings:
     )
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("COMPUTER_USE_ARTIFACTS_DIR", self.artifacts_dir),
+            ("COMPUTER_USE_RECORDINGS_DIR", self.recordings_dir),
+            ("COMPUTER_USE_TRACE_DIR", self.trace_dir),
+            ("COMPUTER_USE_RUNTIME_DIR", self.runtime_dir),
+        ):
+            object.__setattr__(self, _path_field_name(name), _validated_path(name, value))
         _require_choice(
             "COMPUTER_USE_BACKEND",
             self.backend,
@@ -245,6 +274,34 @@ class DaemonSettings:
         _require_range("COMPUTER_USE_TUNNEL_TOKEN_TTL_SECONDS", self.tunnel_token_ttl_seconds, 1)
         _require_range("COMPUTER_USE_MAX_TUNNEL_SESSIONS", self.max_tunnel_sessions, 0)
         _require_range("COMPUTER_USE_MAX_BATCH_ACTIONS", self.max_batch_actions, 1, 500)
+        _require_range(
+            "COMPUTER_USE_POST_ACTION_DELAY_MS",
+            self.post_action_delay_ms,
+            0,
+            10_000,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_BATCH_DURATION_MS",
+            self.max_batch_duration_ms,
+            1,
+            600_000,
+        )
+        _require_range(
+            "COMPUTER_USE_DEFAULT_ACTION_TIMEOUT_MS",
+            self.default_action_timeout_ms,
+            1,
+            300_000,
+        )
+        _require_range(
+            "COMPUTER_USE_MAX_ACTION_TIMEOUT_MS",
+            self.max_action_timeout_ms,
+            1,
+            600_000,
+        )
+        if self.default_action_timeout_ms > self.max_action_timeout_ms:
+            raise ValueError(
+                "default_action_timeout_ms must not exceed max_action_timeout_ms"
+            )
         _require_range("COMPUTER_USE_MAX_ACTION_DEPTH", self.max_action_depth, 1, 128)
         _require_range("COMPUTER_USE_MAX_JSON_BODY_BYTES", self.max_json_body_bytes, 0)
         _require_range(
@@ -294,3 +351,12 @@ def _require_range(name: str, value: int, minimum: int, maximum: int | None = No
         if maximum is None:
             raise ValueError(f"{name} must be at least {minimum}")
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
+
+
+def _path_field_name(environment_name: str) -> str:
+    return {
+        "COMPUTER_USE_ARTIFACTS_DIR": "artifacts_dir",
+        "COMPUTER_USE_RECORDINGS_DIR": "recordings_dir",
+        "COMPUTER_USE_TRACE_DIR": "trace_dir",
+        "COMPUTER_USE_RUNTIME_DIR": "runtime_dir",
+    }[environment_name]

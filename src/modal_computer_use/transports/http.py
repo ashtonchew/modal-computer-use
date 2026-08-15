@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -14,6 +16,8 @@ from modal_computer_use.observability import get_tracer
 
 from .metadata import MetadataHeaders, resolve_metadata_headers
 
+_OWNER_PROOF_HEADER = "X-Computer-Use-Owner-Proof"
+
 
 class HTTPTransport:
     def __init__(
@@ -26,6 +30,7 @@ class HTTPTransport:
         client: httpx.Client | None = None,
         _metadata_headers: MetadataHeaders | None = None,
         _token_resolver: Callable[[], str] | None = None,
+        owner_proof: str | None = None,
     ) -> None:
         if token is not None and _token_resolver is not None:
             raise ValueError("token and _token_resolver are mutually exclusive")
@@ -33,6 +38,7 @@ class HTTPTransport:
         self._token = token
         self._token_resolver = _token_resolver
         self._token_lock = Lock()
+        self._owner_proof = owner_proof
         self.last_http_version: str | None = None
         self._client = client or httpx.Client(
             base_url=self.base_url,
@@ -55,6 +61,14 @@ class HTTPTransport:
     def close(self) -> None:
         self._client.close()
 
+    @property
+    def owner_proof(self) -> str | None:
+        return self._owner_proof
+
+    @owner_proof.setter
+    def owner_proof(self, value: str | None) -> None:
+        self._owner_proof = value
+
     def request(
         self,
         method: str,
@@ -65,7 +79,7 @@ class HTTPTransport:
         content: bytes | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        request_headers = self._request_headers(headers)
+        request_headers = self._request_headers(headers, path=path)
         with self._tracer.span(
             "sdk.request",
             {
@@ -104,7 +118,7 @@ class HTTPTransport:
 
         if isinstance(max_bytes, bool) or max_bytes < 1:
             raise ValueError("max_bytes must be positive")
-        request_headers = self._request_headers(headers)
+        request_headers = self._request_headers(headers, path=path)
         with (
             self._tracer.span(
                 "sdk.request",
@@ -154,7 +168,7 @@ class HTTPTransport:
             self._client.stream(
                 "GET",
                 path,
-                headers=self._request_headers(None),
+                headers=self._request_headers(None, path=path),
             ) as response,
         ):
             self.last_http_version = response.http_version
@@ -163,16 +177,31 @@ class HTTPTransport:
             if error_code:
                 span.set_attribute("error.code", error_code)
             self._raise_for_status(response)
-            with output.open("wb") as handle:
-                for chunk in response.iter_bytes():
-                    if chunk:
-                        handle.write(chunk)
+            temporary = _create_download_temp(output)
+            try:
+                with temporary.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        if chunk:
+                            handle.write(chunk)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, output)
+            except BaseException:
+                _remove_download_temp(temporary)
+                raise
         return output
 
-    def _request_headers(self, headers: Mapping[str, str] | None) -> dict[str, str]:
+    def _request_headers(
+        self,
+        headers: Mapping[str, str] | None,
+        *,
+        path: str,
+    ) -> dict[str, str]:
         request_headers = dict(headers or {})
         if self.token:
             request_headers.setdefault("Authorization", f"Bearer {self.token}")
+        if self._owner_proof and _owner_proof_route(path):
+            request_headers.setdefault(_OWNER_PROOF_HEADER, self._owner_proof)
         request_headers.update(resolve_metadata_headers(self._metadata_headers))
         return request_headers
 
@@ -198,6 +227,25 @@ class HTTPTransport:
             )
 
 
+def _create_download_temp(output: Path) -> Path:
+    descriptor, name = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    os.close(descriptor)
+    return Path(name)
+
+
+def _remove_download_temp(path: Path) -> None:
+    with suppress(FileNotFoundError):
+        path.unlink()
+
+
+def _fsync_download_temp(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _route_path(path: str) -> str:
     route = urlsplit(path).path or "/"
     if route.startswith("/v1/artifacts/") and route not in {
@@ -221,6 +269,17 @@ def _error_code(response: httpx.Response) -> str | None:
     return code if isinstance(code, str) else None
 
 
+def _owner_proof_route(path: str) -> bool:
+    route = urlsplit(path).path
+    if route in {
+        "/v1/computer/start",
+        "/v1/computer/stop",
+        "/v1/computer/restart",
+    }:
+        return True
+    return route.startswith("/v1/processes/") and route.endswith("/restart")
+
+
 class AsyncHTTPTransport:
     """Native async HTTP transport with one connection-pooled client."""
 
@@ -233,9 +292,11 @@ class AsyncHTTPTransport:
         http2: bool = False,
         client: httpx.AsyncClient | None = None,
         _metadata_headers: MetadataHeaders | None = None,
+        owner_proof: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self._owner_proof = owner_proof
         self.last_http_version: str | None = None
         self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
@@ -247,6 +308,14 @@ class AsyncHTTPTransport:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    @property
+    def owner_proof(self) -> str | None:
+        return self._owner_proof
+
+    @owner_proof.setter
+    def owner_proof(self, value: str | None) -> None:
+        self._owner_proof = value
 
     async def __aenter__(self) -> AsyncHTTPTransport:
         return self
@@ -264,7 +333,7 @@ class AsyncHTTPTransport:
         content: bytes | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        request_headers = self._request_headers(headers)
+        request_headers = self._request_headers(headers, path=path)
         with self._tracer.span(
             "sdk.request",
             {
@@ -303,7 +372,7 @@ class AsyncHTTPTransport:
 
         if isinstance(max_bytes, bool) or max_bytes < 1:
             raise ValueError("max_bytes must be positive")
-        request_headers = self._request_headers(headers)
+        request_headers = self._request_headers(headers, path=path)
         with self._tracer.span(
             "sdk.request",
             {"http.method": method, "http.route": _route_path(path)},
@@ -352,21 +421,36 @@ class AsyncHTTPTransport:
             async with self._client.stream(
                 "GET",
                 path,
-                headers=self._request_headers(None),
+                headers=self._request_headers(None, path=path),
             ) as response:
                 self.last_http_version = response.http_version
                 span.set_attribute("http.status_code", response.status_code)
                 await self._raise_for_status(response)
-                async with await anyio.open_file(output, "wb") as handle:
-                    async for chunk in response.aiter_bytes():
-                        if chunk:
-                            await handle.write(chunk)
+                temporary = _create_download_temp(output)
+                try:
+                    async with await anyio.open_file(temporary, "wb") as handle:
+                        async for chunk in response.aiter_bytes():
+                            if chunk:
+                                await handle.write(chunk)
+                    await anyio.to_thread.run_sync(_fsync_download_temp, temporary)
+                    await anyio.to_thread.run_sync(os.replace, temporary, output)
+                except BaseException:
+                    with anyio.CancelScope(shield=True):
+                        await anyio.to_thread.run_sync(_remove_download_temp, temporary)
+                    raise
         return output
 
-    def _request_headers(self, headers: Mapping[str, str] | None) -> dict[str, str]:
+    def _request_headers(
+        self,
+        headers: Mapping[str, str] | None,
+        *,
+        path: str,
+    ) -> dict[str, str]:
         request_headers = dict(headers or {})
         if self.token:
             request_headers.setdefault("Authorization", f"Bearer {self.token}")
+        if self._owner_proof and _owner_proof_route(path):
+            request_headers.setdefault(_OWNER_PROOF_HEADER, self._owner_proof)
         request_headers.update(resolve_metadata_headers(self._metadata_headers))
         return request_headers
 

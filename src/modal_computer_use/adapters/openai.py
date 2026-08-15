@@ -106,19 +106,17 @@ class OpenAIAdapter:
             keys = action.get("keys") or action.get("key")
             if not keys:
                 raise ActionValidationError("OpenAI keypress action requires key or keys")
-            if isinstance(keys, list) and len(keys) > 1:
-                raise ActionValidationError(
-                    "OpenAI multi-key keypress actions require apply_many()"
-                )
             if isinstance(keys, list):
+                if len(keys) > 1:
+                    return _with_common(
+                        {
+                            "type": "hotkey",
+                            "keys": list(keys),
+                        },
+                        action,
+                    )
                 keys = keys[0]
-            return _with_common(
-                {
-                    "type": "keypress",
-                    "key": keys,
-                },
-                action,
-            )
+            return _with_common({"type": "keypress", "key": keys}, action)
         if kind == "drag":
             if "path" in action:
                 return _with_common(
@@ -176,16 +174,7 @@ class OpenAIAdapter:
         normalized: list[dict[str, Any]] = []
         for action in actions:
             kind = action.get("type") or action.get("action")
-            if kind == "keypress" and isinstance(action.get("keys"), list):
-                _reject_unknown_fields(action)
-                keys = action["keys"]
-                if not keys:
-                    raise ActionValidationError("OpenAI keypress action requires keys")
-                normalized.extend(
-                    _with_common({"type": "keypress", "key": key}, action)
-                    for key in keys
-                )
-            elif kind == "scroll":
+            if kind == "scroll":
                 _reject_unknown_fields(action)
                 normalized.extend(_scroll_actions(action))
             else:

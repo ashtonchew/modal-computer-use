@@ -65,3 +65,7 @@ uv run ruff check .
 uv run pytest
 uv run mypy src
 ```
+
+The ordinary test run is non-billable: every `@pytest.mark.modal` smoke item is skipped unless a
+trusted operator explicitly sets `MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1`. Live tests also require the
+Modal credentials and any per-surface authorization variables documented in the release checklist.

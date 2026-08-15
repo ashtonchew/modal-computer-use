@@ -6,11 +6,14 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.leases import (
     LEASE_PROTOCOL_VERSION,
     LEASE_TOKEN_HEADER,
     lease_credentials_from_headers,
 )
+from modal_computer_use.models import ActionResult
+from modal_computer_use.redaction import sanitize_payload
 
 router = APIRouter(prefix="/v1/leases", include_in_schema=False)
 
@@ -38,6 +41,10 @@ async def acquire(
         async with request.app.state.lease_lock:
             previous = request.app.state.lease_coordinator.prepare_acquire()
         if previous["state"] == "expired" and isinstance(previous["run_id"], str):
+            await _release_all_before_lease_transition(
+                request.app.state,
+                previous["run_id"],
+            )
             await request.app.state.receipt_journal.seal_run(
                 previous["run_id"],
                 "lease_expired",
@@ -85,6 +92,10 @@ async def status(request: Request, response: Response) -> dict[str, object]:
         async with request.app.state.lease_lock:
             result = request.app.state.lease_coordinator.status()
         if result["state"] == "expired" and isinstance(result["run_id"], str):
+            await _release_all_before_lease_transition(
+                request.app.state,
+                result["run_id"],
+            )
             await request.app.state.receipt_journal.seal_run(
                 result["run_id"],
                 "lease_expired",
@@ -113,6 +124,13 @@ async def _expire_after_ttl(state: Any) -> None:
             async with state.lease_lock:
                 status = state.lease_coordinator.status()
             if status["state"] == "expired" and isinstance(status["run_id"], str):
+                try:
+                    await _release_all_before_lease_transition(
+                        state,
+                        status["run_id"],
+                    )
+                except DaemonError:
+                    return
                 await state.receipt_journal.seal_run(status["run_id"], "lease_expired")
     except asyncio.CancelledError:
         raise
@@ -127,6 +145,19 @@ async def _seal_and_release_cancellation_safe(
     admitted_lease: Any,
 ) -> dict[str, object]:
     async def seal_and_release() -> dict[str, object]:
+        try:
+            await _release_all_before_lease_transition(
+                state,
+                admitted_lease.run_id,
+                force=True,
+            )
+        except DaemonError:
+            # Keep ownership non-acquirable while recovery is required, but do
+            # not leave a lease that can block recovery indefinitely.
+            async with state.lease_lock:
+                state.lease_coordinator.release_validated(admitted_lease)
+            _cancel_expiry(state)
+            raise
         await state.receipt_journal.seal_run(admitted_lease.run_id, "lease_released")
         async with state.lease_lock:
             result = state.lease_coordinator.release_validated(admitted_lease)
@@ -147,3 +178,54 @@ async def _seal_and_release_cancellation_safe(
         if cancellation is not None:
             raise cancellation
         return result
+
+
+async def _release_all_before_lease_transition(
+    state: Any,
+    run_id: str | None,
+    *,
+    force: bool = False,
+) -> None:
+    """Release every held key/button before ownership can become available."""
+    if not force:
+        if not isinstance(run_id, str):
+            return
+        async with state.lease_lock:
+            if not state.lease_coordinator.input_cleanup_required(run_id):
+                return
+    try:
+        result = await state.backend.release_all()
+    except Exception as exc:
+        incident_id = await state.receipt_journal.quarantine_run(
+            run_id,
+            classification="lease_cleanup_failed",
+        )
+        raise DaemonError(
+            "failed to release all held input",
+            status_code=400,
+            code="release_all_failed",
+            details={"incident_id": incident_id, "error": type(exc).__name__},
+        ) from exc
+    if isinstance(result, ActionResult) and result.ok:
+        if isinstance(run_id, str):
+            async with state.lease_lock:
+                state.lease_coordinator.mark_input_cleanup_complete(run_id)
+        return
+    output = sanitize_payload(result.output) if isinstance(result, ActionResult) else {}
+    details = output if isinstance(output, dict) else {}
+    incident_id = await state.receipt_journal.quarantine_run(
+        run_id,
+        classification="lease_cleanup_failed",
+    )
+    details = {**details, "incident_id": incident_id}
+    code = (
+        details.get("code")
+        if isinstance(details.get("code"), str)
+        else "release_all_failed"
+    )
+    message = (
+        result.message
+        if isinstance(result, ActionResult) and result.message
+        else "failed to release all held input"
+    )
+    raise DaemonError(str(message), status_code=400, code=code, details=details)

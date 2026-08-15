@@ -9,6 +9,9 @@ from typing import Any
 
 import pytest
 
+if importlib.util.find_spec("modal") is None:
+    pytest.skip("Modal benchmark runner requires the optional modal extra", allow_module_level=True)
+
 from modal_computer_use.benchmarks.step_promotion_measurement import (
     measure_interleaved_step_promotion,
 )

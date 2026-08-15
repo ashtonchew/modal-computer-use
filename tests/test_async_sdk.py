@@ -87,6 +87,93 @@ async def test_async_http_transport_reuses_client_and_injects_private_metadata(
 
 
 @pytest.mark.asyncio
+async def test_async_http_download_preserves_existing_destination_on_cancellation(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    target.write_bytes(b"old")
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_CancelledAsyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = AsyncHTTPTransport("https://daemon.example", client=http_client)
+    before = set(tmp_path.iterdir())
+
+    with pytest.raises(asyncio.CancelledError):
+        await transport.stream_download("/download", target)
+
+    assert target.read_bytes() == b"old"
+    assert set(tmp_path.iterdir()) == before
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_http_download_keeps_absent_destination_absent_on_cancellation(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_CancelledAsyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = AsyncHTTPTransport("https://daemon.example", client=http_client)
+    before = set(tmp_path.iterdir())
+
+    with pytest.raises(asyncio.CancelledError):
+        await transport.stream_download("/download", target)
+
+    assert not target.exists()
+    assert set(tmp_path.iterdir()) == before
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_http_download_replaces_existing_destination_after_success(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "artifact.bin"
+    target.write_bytes(b"old")
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                stream=_SuccessfulAsyncDownloadStream(),
+                request=request,
+            )
+        ),
+    )
+    transport = AsyncHTTPTransport("https://daemon.example", client=http_client)
+
+    assert await transport.stream_download("/download", target) == target
+    assert target.read_bytes() == b"new"
+    await transport.aclose()
+
+
+class _CancelledAsyncDownloadStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b"new"
+        raise asyncio.CancelledError
+
+
+class _SuccessfulAsyncDownloadStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b"new"
+
+
+@pytest.mark.asyncio
 async def test_async_daemon_client_composes_cached_namespaces() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/mouse/move"
@@ -346,6 +433,46 @@ async def test_async_hot_session_cancellation_poison_closes_without_replay() -> 
 
 
 @pytest.mark.asyncio
+async def test_async_hot_session_serialization_failure_does_not_poison_mutation() -> None:
+    websocket = _FakeHotWebSocket(auto_reply=True)
+    transport = AsyncHotSessionTransport("https://daemon.example", websocket=websocket)
+
+    with pytest.raises(TypeError):
+        await transport.request("run_actions", {"actions": [object()]})
+
+    assert websocket.sent == []
+    assert websocket.closed is False
+    assert transport._poisoned is False
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_hot_session_taints_safe_nonmutation_and_reconnects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _FakeHotWebSocket(auto_reply=True, response_id="unexpected")
+    second = _FakeHotWebSocket(auto_reply=True)
+
+    async def fake_connect(*_args: Any, **_kwargs: Any) -> _FakeHotWebSocket:
+        return second
+
+    monkeypatch.setattr(
+        "modal_computer_use.transports.async_hot_session.connect",
+        fake_connect,
+    )
+    transport = AsyncHotSessionTransport("https://daemon.example", websocket=first)
+
+    with pytest.raises(DaemonHTTPError) as first_error:
+        await transport.ping()
+    assert first_error.value.code == "hot_session_protocol_error"
+    assert first.closed is True
+
+    assert await transport.ping() == {"request_id": "2"}
+    assert second.closed is False
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_distinct_async_hot_clients_progress_and_fail_independently() -> None:
     blocked_websocket = _FakeHotWebSocket(auto_reply=False)
     healthy_websocket = _FakeHotWebSocket(auto_reply=True)
@@ -422,6 +549,81 @@ async def test_async_observation_receiver_failure_is_terminal_and_fails_fast() -
 
 
 @pytest.mark.asyncio
+async def test_async_observation_configure_applies_timing_before_interleaved_frame() -> None:
+    websocket = _FakeObservationWebSocket()
+    transport = AsyncObservationStreamTransport(
+        "https://daemon.example",
+        websocket=websocket,
+    )
+    await transport.start({"frame_encoding": "json-binary", "transport_timing": False})
+    await transport.receive_frame()
+
+    await transport.configure({"transport_timing": True})
+    frame = await transport.receive_frame()
+
+    assert frame.payload == b"configured"
+    assert frame.transport_timing is not None
+    assert frame.transport_timing["server_emit_timing_ms"]["emit_total_ms"] == 2.0
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_observation_configure_accepts_old_timing_during_transition() -> None:
+    websocket = _FakeObservationWebSocket()
+    transport = AsyncObservationStreamTransport(
+        "https://daemon.example",
+        websocket=websocket,
+    )
+    await transport.start({"frame_encoding": "json-binary", "transport_timing": True})
+    initial = await transport.receive_frame()
+    assert initial.transport_timing is not None
+
+    await transport.configure({"transport_timing": False})
+    frame = await transport.receive_frame()
+
+    assert frame.payload == b"configured"
+    assert frame.transport_timing is not None
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_observation_configure_delivers_untimed_frame_after_ack() -> None:
+    websocket = _FakeObservationWebSocket(configure_frame_after_result=True)
+    transport = AsyncObservationStreamTransport(
+        "https://daemon.example",
+        websocket=websocket,
+    )
+    await transport.start({"frame_encoding": "json-binary", "transport_timing": True})
+    await transport.receive_frame()
+
+    await transport.configure({"transport_timing": False})
+    frame = await asyncio.wait_for(transport.receive_frame(), timeout=1.0)
+
+    assert frame.payload == b"configured"
+    assert frame.transport_timing is None
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
+async def test_async_observation_configure_error_restores_timing_before_next_frame() -> None:
+    websocket = _FakeObservationWebSocket(configure_error_then_frame=True)
+    transport = AsyncObservationStreamTransport(
+        "https://daemon.example",
+        websocket=websocket,
+    )
+    await transport.start({"frame_encoding": "json-binary", "transport_timing": True})
+    await transport.receive_frame()
+
+    with pytest.raises(DaemonHTTPError, match="configure rejected"):
+        await transport.configure({"transport_timing": False})
+    frame = await asyncio.wait_for(transport.receive_frame(), timeout=1.0)
+
+    assert frame.payload == b"configured"
+    assert frame.transport_timing is not None
+    await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_async_observation_mutation_cancellation_poison_closes_without_replay() -> None:
     websocket = _FakeObservationWebSocket(block_mutation=True)
     transport = AsyncObservationStreamTransport(
@@ -452,8 +654,9 @@ def _parameters_without_self(method: Any) -> list[tuple[str, inspect._ParameterK
 
 
 class _FakeHotWebSocket:
-    def __init__(self, *, auto_reply: bool) -> None:
+    def __init__(self, *, auto_reply: bool, response_id: str | None = None) -> None:
         self.auto_reply = auto_reply
+        self.response_id = response_id
         self.incoming: asyncio.Queue[str | bytes] = asyncio.Queue()
         self.incoming.put_nowait(json.dumps({"type": "ready"}))
         self.sent: list[dict[str, Any]] = []
@@ -471,7 +674,7 @@ class _FakeHotWebSocket:
             self.incoming.put_nowait(
                 json.dumps(
                     {
-                        "id": message["id"],
+                        "id": self.response_id or message["id"],
                         "type": "result",
                         "result": {"request_id": message["id"]},
                     }
@@ -491,8 +694,16 @@ class _FakeHotWebSocket:
 
 
 class _FakeObservationWebSocket:
-    def __init__(self, *, block_mutation: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        block_mutation: bool = False,
+        configure_frame_after_result: bool = False,
+        configure_error_then_frame: bool = False,
+    ) -> None:
         self.block_mutation = block_mutation
+        self.configure_frame_after_result = configure_frame_after_result
+        self.configure_error_then_frame = configure_error_then_frame
         self.incoming: asyncio.Queue[str | bytes | BaseException] = asyncio.Queue()
         self.incoming.put_nowait(json.dumps({"type": "ready"}))
         self.sent: list[dict[str, Any]] = []
@@ -510,6 +721,32 @@ class _FakeObservationWebSocket:
         if op == "start":
             self.incoming.put_nowait(json.dumps({"type": "started", "id": request_id}))
             self._put_frame(request_id=None, payload=b"initial", causal=False)
+            if message["payload"].get("transport_timing") is True:
+                self._put_transport_timing()
+        elif op == "configure" and "transport_timing" in message["payload"]:
+            result = json.dumps({"type": "result", "id": request_id})
+            if self.configure_error_then_frame:
+                self.incoming.put_nowait(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "id": request_id,
+                            "error": {
+                                "code": "invalid_configuration",
+                                "message": "configure rejected",
+                            },
+                        }
+                    )
+                )
+                self._put_frame(request_id=None, payload=b"configured", causal=False)
+                self._put_transport_timing()
+            elif self.configure_frame_after_result:
+                self.incoming.put_nowait(result)
+                self._put_frame(request_id=None, payload=b"configured", causal=False)
+            else:
+                self._put_frame(request_id=None, payload=b"configured", causal=False)
+                self._put_transport_timing()
+                self.incoming.put_nowait(result)
         elif op in {"run_actions_capture", "run_actions_observe_change"}:
             self.mutation_sent.set()
             if not self.block_mutation:
@@ -539,6 +776,17 @@ class _FakeObservationWebSocket:
             )
         self.incoming.put_nowait(json.dumps(metadata))
         self.incoming.put_nowait(payload)
+
+    def _put_transport_timing(self) -> None:
+        self.incoming.put_nowait(
+            json.dumps(
+                {
+                    "type": "transport_timing",
+                    "seq": self._sequence,
+                    "server_emit_timing_ms": {"emit_total_ms": 2.0},
+                }
+            )
+        )
 
     async def recv(self) -> str | bytes:
         self.receivers += 1
