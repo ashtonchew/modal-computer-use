@@ -24,10 +24,12 @@
   daemon retains lifecycle-controller authority, drops every GUI and screenshot child to the
   unprivileged desktop account, strips daemon credentials from child environments, and keeps
   temporary screenshot paths root-owned while granting only the write access capture needs.
+  Browser profiles are initialized by that desktop account instead of becoming root-owned.
 - Made persistent artifact Volumes mountable on the managed Image by leaving the mount target
   empty at build time. The daemon now creates its private log and trace directories after the
   Volume is mounted, verifies their ownership without following links, and enforces mode `0700`
-  before desktop children start.
+  before desktop children start. Volume sync runs outside the daemon event loop and uses a bounded
+  extended SDK request timeout.
 
 ## 2.0.0 - 2026-08-10
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 from pathlib import Path
@@ -31,7 +32,7 @@ async def manifest(request: Request, prefix: str = "") -> list[ArtifactInfo]:
 async def sync(request: Request) -> ArtifactSyncResult:
     async def operation() -> ArtifactSyncResult:
         with request.app.state.tracer.span("daemon.artifact.sync"):
-            return request.app.state.artifacts.sync()
+            return await asyncio.to_thread(request.app.state.artifacts.sync)
 
     return await run_idle_only_mutation(request, operation, semantic_data={})
 

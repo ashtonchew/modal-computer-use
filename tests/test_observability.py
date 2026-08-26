@@ -223,6 +223,26 @@ def test_http_transport_passes_http2_to_default_client(monkeypatch) -> None:
     ]
 
 
+def test_http_transport_applies_per_request_timeout_override() -> None:
+    observed: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.Client(
+        base_url="http://daemon.local",
+        transport=httpx.MockTransport(handler),
+        timeout=30.0,
+    )
+    transport = HTTPTransport("http://daemon.local", client=client)
+
+    response = transport.request("POST", "/v1/artifacts/sync", timeout=60.0)
+
+    assert response.json() == {"ok": True}
+    assert observed == [60.0]
+
+
 def test_sdk_request_span_strips_inline_query_from_path(monkeypatch) -> None:
     tracer = _CapturedTracer()
     monkeypatch.setattr("modal_computer_use.transports.http.get_tracer", lambda **_: tracer)

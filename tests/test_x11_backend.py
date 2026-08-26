@@ -383,6 +383,49 @@ def test_modified_pointer_operations_preserve_preheld_modifiers(operation: str) 
     assert backend.held_keys == {"shift"}
 
 
+def test_managed_browser_profile_is_prepared_by_desktop_child(tmp_path, monkeypatch) -> None:
+    profile = tmp_path / "browser-profile"
+    environment = {
+        "COMPUTER_USE_DESKTOP_USER": "computer-desktop",
+        "DISPLAY": ":99",
+    }
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        browser_module,
+        "desktop_process_environment",
+        lambda *, display: environment,
+    )
+    monkeypatch.setattr(
+        browser_module,
+        "desktop_process_command",
+        lambda *args, environ: ("setpriv", "--", *args),
+    )
+
+    def run(command, **kwargs):
+        commands.append(tuple(command))
+        assert kwargs["env"] is environment
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_module.subprocess, "run", run)
+
+    resolved = browser_module.ensure_browser_profile(str(profile))
+
+    assert resolved == str(profile)
+    assert commands == [
+        (
+            "setpriv",
+            "--",
+            "install",
+            "-d",
+            "-m",
+            "0700",
+            "--",
+            str(profile),
+        )
+    ]
+    assert not profile.exists()
+
+
 def test_x11_launch_and_open_url_spawn_desktop_process() -> None:
     backend = RecordingX11Backend()
     backend.browser = "chromium"

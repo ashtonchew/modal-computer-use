@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import stat
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,6 +19,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
+from modal_computer_use.models import ArtifactSyncResult
 
 
 @pytest.mark.parametrize(
@@ -467,6 +471,42 @@ def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:
     assert result.persistent is False
     assert result.synced_paths == []
     assert "no-op" in (result.message or "")
+
+
+def test_artifact_sync_route_runs_mountpoint_sync_off_event_loop(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        runtime_dir=tmp_path / "runtime",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    sync_thread_ids: list[int] = []
+
+    def sync() -> ArtifactSyncResult:
+        sync_thread_ids.append(threading.get_ident())
+        return ArtifactSyncResult(ok=True, persistent=True, synced_paths=["artifact-root"])
+
+    app.state.artifacts.sync = sync
+
+    async def exercise() -> int:
+        event_loop_thread_id = threading.get_ident()
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                response = await client.post("/v1/artifacts/sync")
+        assert response.status_code == 200
+        return event_loop_thread_id
+
+    event_loop_thread_id = asyncio.run(exercise())
+
+    assert sync_thread_ids
+    assert all(thread_id != event_loop_thread_id for thread_id in sync_thread_ids)
 
 
 def test_artifact_sync_runs_mountpoint_sync_for_persistent_volume(tmp_path) -> None:
