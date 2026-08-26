@@ -66,8 +66,19 @@ class DaemonClient:
         json: Any | None = None,
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
+        _timeout: float | None = None,
     ) -> Any:
-        response = self._request("POST", path, json=json, headers=headers, mutation=_mutation)
+        request_options: dict[str, Any] = {}
+        if _timeout is not None:
+            request_options["timeout"] = _timeout
+        response = self._request(
+            "POST",
+            path,
+            json=json,
+            headers=headers,
+            mutation=_mutation,
+            **request_options,
+        )
         if not response.content:
             return None
         return response.json()
@@ -469,8 +480,19 @@ class AsyncDaemonClient:
         json: Any | None = None,
         headers: dict[str, str] | None = None,
         _mutation: bool = False,
+        _timeout: float | None = None,
     ) -> Any:
-        response = await self._request("POST", path, json=json, headers=headers, mutation=_mutation)
+        request_options: dict[str, Any] = {}
+        if _timeout is not None:
+            request_options["timeout"] = _timeout
+        response = await self._request(
+            "POST",
+            path,
+            json=json,
+            headers=headers,
+            mutation=_mutation,
+            **request_options,
+        )
         return response.json() if response.content else None
 
     async def put_json(

@@ -3,6 +3,12 @@
   <h1>modal-computer-use</h1>
 </div>
 
+[![PyPI](https://img.shields.io/pypi/v/modal-computer-use)](https://pypi.org/project/modal-computer-use/)
+[![Latest release](https://img.shields.io/github/v/release/ashtonchew/modal-computer-use)](https://github.com/ashtonchew/modal-computer-use/releases/latest)
+[![Release validation](https://github.com/ashtonchew/modal-computer-use/actions/workflows/release-validation.yml/badge.svg?branch=main)](https://github.com/ashtonchew/modal-computer-use/actions/workflows/release-validation.yml)
+[![Python](https://img.shields.io/pypi/pyversions/modal-computer-use)](https://pypi.org/project/modal-computer-use/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 `modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop through a
 typed, provider-neutral Python SDK and an in-Sandbox daemon.
 
@@ -18,8 +24,8 @@ uv add "modal-computer-use[modal]"
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.3 or later.
 
-Save this as `quickstart.py`. Choose one exact Modal region for both the Function and the Sandbox.
-The resource values are application choices, not SDK defaults.
+Save this as `quickstart.py`. Choose one supported narrow Modal region selector for both the
+Function and the Sandbox. The resource values are application choices, not SDK defaults.
 
 ```python
 import uuid
@@ -29,7 +35,7 @@ import modal
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig, ComputerSessionHandle
 
 APP_NAME = "computer-use-quickstart"
-REGION = "us-west-2"
+REGION = "us-west"
 
 app = modal.App(APP_NAME)
 function_image = modal.Image.debian_slim(python_version="3.12").pip_install(

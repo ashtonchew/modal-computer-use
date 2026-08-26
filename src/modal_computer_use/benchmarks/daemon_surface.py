@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from ..client import DaemonClient
 from . import core
-from .billing import reconcile_modal_billing_from_metadata
+from .billing import reconcile_modal_billing
 from .surface_result import _surface_not_measured, _surface_result
 from .surface_verification import _run_daemon_http_verification
 
@@ -19,6 +19,7 @@ def _run_daemon_http_surface(
     iterations: int,
     warmup_iterations: int,
     environment_metadata: dict[str, Any] | None,
+    billing_reconciliation_request: dict[str, Any] | None,
     typing_method: str,
     typing_delay_ms: int,
     before_action_iteration: Callable[[], None] | None,
@@ -160,7 +161,11 @@ def _run_daemon_http_surface(
         metadata=metadata,
         runtime_seconds=_modal_surface_runtime_seconds(environment_metadata),
         verification=_run_daemon_http_verification(client),
-        billing_reconciliation=reconcile_modal_billing_from_metadata(environment_metadata),
+        billing_reconciliation=(
+            reconcile_modal_billing(billing_reconciliation_request)
+            if billing_reconciliation_request is not None
+            else None
+        ),
     )
 
 

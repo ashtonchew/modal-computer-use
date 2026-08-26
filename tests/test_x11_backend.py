@@ -383,6 +383,49 @@ def test_modified_pointer_operations_preserve_preheld_modifiers(operation: str) 
     assert backend.held_keys == {"shift"}
 
 
+def test_managed_browser_profile_is_prepared_by_desktop_child(tmp_path, monkeypatch) -> None:
+    profile = tmp_path / "browser-profile"
+    environment = {
+        "COMPUTER_USE_DESKTOP_USER": "computer-desktop",
+        "DISPLAY": ":99",
+    }
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        browser_module,
+        "desktop_process_environment",
+        lambda *, display: environment,
+    )
+    monkeypatch.setattr(
+        browser_module,
+        "desktop_process_command",
+        lambda *args, environ: ("setpriv", "--", *args),
+    )
+
+    def run(command, **kwargs):
+        commands.append(tuple(command))
+        assert kwargs["env"] is environment
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_module.subprocess, "run", run)
+
+    resolved = browser_module.ensure_browser_profile(str(profile))
+
+    assert resolved == str(profile)
+    assert commands == [
+        (
+            "setpriv",
+            "--",
+            "install",
+            "-d",
+            "-m",
+            "0700",
+            "--",
+            str(profile),
+        )
+    ]
+    assert not profile.exists()
+
+
 def test_x11_launch_and_open_url_spawn_desktop_process() -> None:
     backend = RecordingX11Backend()
     backend.browser = "chromium"
@@ -671,6 +714,30 @@ def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
     maim_commands = [command for command in backend.commands if command and command[0] == "maim"]
     assert maim_commands[0][1] == "-u"
     assert "-u" not in maim_commands[1]
+
+
+def test_x11_file_capture_prepares_output_for_desktop_child(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    prepared: list[int] = []
+
+    async def write_png(*args: str, **_kwargs):
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    backend._screenshots._mss.grab = lambda _source: None
+    monkeypatch.setattr(
+        screenshots_module,
+        "prepare_desktop_output_file",
+        prepared.append,
+    )
+
+    anyio.run(
+        backend.screenshot_bytes,
+        ScreenshotOptions(format="png", show_cursor=True),
+    )
+
+    assert len(prepared) == 1
 
 
 def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None:

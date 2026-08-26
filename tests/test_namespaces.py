@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from modal_computer_use.namespaces.actions import ActionsNamespace
+from modal_computer_use.namespaces.artifacts import ArtifactsNamespace
 from modal_computer_use.namespaces.recordings import RecordingsNamespace
 from modal_computer_use.namespaces.screenshots import ScreenshotsNamespace
 
@@ -14,6 +15,7 @@ class _FakeClient:
     def __init__(self) -> None:
         self.posts: list[dict[str, Any]] = []
         self.downloads: list[tuple[str, Path]] = []
+        self.request_timeouts: list[float | None] = []
 
     def post_json(
         self,
@@ -22,10 +24,14 @@ class _FakeClient:
         json: Any | None = None,
         headers=None,
         _mutation: bool = False,
+        _timeout: float | None = None,
     ):
+        self.request_timeouts.append(_timeout)
         self.posts.append({"path": path, "json": json, "headers": headers})
         if path == "/v1/actions/validate":
             return {"ok": True, "errors": []}
+        if path == "/v1/artifacts/sync":
+            return {"ok": True, "persistent": True, "synced_paths": ["artifact-root"]}
         return {
             "ok": True,
             "call_id": json.get("call_id") if isinstance(json, dict) else None,
@@ -177,6 +183,17 @@ def test_recordings_namespace_download_streams_to_target(tmp_path) -> None:
 
     assert result == target
     assert client.downloads == [("/v1/recordings/rec_123/download", target)]
+
+
+def test_artifact_sync_uses_extended_request_timeout() -> None:
+    client = _FakeClient()
+    namespace = ArtifactsNamespace(client)  # type: ignore[arg-type]
+
+    result = namespace.sync()
+
+    assert result.ok is True
+    assert client.posts[0]["path"] == "/v1/artifacts/sync"
+    assert client.request_timeouts == [60.0]
 
 
 def test_screenshots_namespace_full_bytes_uses_raw_endpoint() -> None:

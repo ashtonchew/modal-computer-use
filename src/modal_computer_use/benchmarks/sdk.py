@@ -18,6 +18,7 @@ def run_sdk_surface_benchmark(
     sandbox_exec_runner: Callable[[tuple[str, ...], int], object] | None = None,
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
+    billing_reconciliation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from .surfaces import run_sdk_surface_benchmark as run_surfaces
 
@@ -31,6 +32,7 @@ def run_sdk_surface_benchmark(
         sandbox_exec_runner=sandbox_exec_runner,
         sandbox_exec_setup_failure=sandbox_exec_setup_failure,
         environment_metadata=environment_metadata,
+        billing_reconciliation_request=billing_reconciliation_request,
     )
 
 def run_sdk_surface_benchmark_mock_local(
@@ -40,6 +42,7 @@ def run_sdk_surface_benchmark_mock_local(
     sandbox_exec_runner: Callable[[tuple[str, ...], int], object] | None = None,
     sandbox_exec_setup_failure: dict[str, Any] | None = None,
     environment_metadata: dict[str, Any] | None = None,
+    billing_reconciliation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _with_mock_local_client(
         lambda client: run_sdk_surface_benchmark(
@@ -51,5 +54,6 @@ def run_sdk_surface_benchmark_mock_local(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=environment_metadata,
+            billing_reconciliation_request=billing_reconciliation_request,
         )
     )

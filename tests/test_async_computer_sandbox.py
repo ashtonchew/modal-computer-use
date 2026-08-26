@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -32,7 +33,6 @@ from modal_computer_use.errors import (
     SessionEnvironmentMismatchError,
     SessionPlacementMalformedError,
     SessionPlacementMissingError,
-    SessionPlacementUnverifiableError,
 )
 from modal_computer_use.state import APP_ID_TAG, compute_config_hash
 from modal_computer_use.transports import AsyncHTTPTransport
@@ -162,7 +162,10 @@ class _FakeSandbox:
         return {8080: SimpleNamespace(url="https://daemon.invalid")}
 
     async def _exec(self, *_args: str, **_kwargs: object) -> object:
-        return _FakeProcess(self.calls, self.daemon_bearer)
+        stdout = self.daemon_bearer
+        if any("MODAL_CLOUD_PROVIDER" in arg for arg in _args):
+            stdout = json.dumps({"cloud": "aws", "region": "us-west-2"})
+        return _FakeProcess(self.calls, stdout)
 
     async def _terminate(self, *, wait: bool = False) -> object:
         self.terminate_calls.append(wait)
@@ -332,7 +335,7 @@ def _connect_config() -> ComputerConfig:
         run_id="run-async",
         ingress="connect",
         expose_vnc="off",
-        runtime={"modal_environment": "test", "modal_region": "us-west-2"},
+        runtime={"modal_environment": "test", "modal_region": "us-west"},
     )
 
 
@@ -353,12 +356,6 @@ def _connect_config() -> ComputerConfig:
                 runtime={"modal_environment": "test", "modal_region": "not a region"}
             ),
             SessionPlacementMalformedError,
-        ),
-        (
-            ComputerConfig(
-                runtime={"modal_environment": "test", "modal_region": "us-west"}
-            ),
-            SessionPlacementUnverifiableError,
         ),
     ],
 )
@@ -406,7 +403,7 @@ async def test_async_owner_reports_observed_runtime_placement(
         return None
 
     async def placement(_sandbox: object) -> dict[str, str]:
-        return {"cloud": "aws", "region": "us-west-2"}
+        return {"cloud": "aws", "region": "us-west"}
 
     monkeypatch.setattr(AsyncDaemonClient, "wait_until_ready", ready)
     monkeypatch.setattr(
@@ -420,7 +417,7 @@ async def test_async_owner_reports_observed_runtime_placement(
     ) as computer:
         assert await computer.runtime_placement() == {
             "cloud": "aws",
-            "region": "us-west-2",
+            "region": "us-west",
         }
 
     assert "Sandbox.create.aio" in runtime.calls

@@ -87,7 +87,7 @@ the exact clean commit that you want to promote:
 source_sha="$(git rev-parse HEAD)"
 MODAL_COMPUTER_USE_PROMOTION_ENVIRONMENT=main \
 MODAL_COMPUTER_USE_PROMOTION_CLOUD=aws \
-MODAL_COMPUTER_USE_PROMOTION_REGION=us-west-2 \
+MODAL_COMPUTER_USE_PROMOTION_REGION=us-west \
 uv run modal run --env main scripts/run_optimized_default_promotion.py \
   --source-sha "$source_sha" \
   --sample-count 30 \
@@ -157,7 +157,7 @@ Run the pilot first. It uses one warmup pair and two measured samples per arm:
 uv run python scripts/run_modal_image_lifecycle_benchmark.py pilot \
   --source-sha "$source_sha" \
   --manifest "$result_root/standard-image-release.json" \
-  --region us-west-2 \
+  --region us-west \
   --cpu 1 \
   --memory-mib 2048 \
   --sandbox-timeout-seconds 180 \
@@ -174,7 +174,7 @@ interleaved order. It allows no retry or replacement sample.
 uv run python scripts/run_modal_image_lifecycle_benchmark.py primary \
   --source-sha "$source_sha" \
   --manifest "$result_root/standard-image-release.json" \
-  --region us-west-2 \
+  --region us-west \
   --cpu 1 \
   --memory-mib 2048 \
   --sandbox-timeout-seconds 180 \
@@ -278,7 +278,7 @@ Run the exact clean commit that you want to promote:
 source_sha="$(git rev-parse HEAD)"
 MODAL_COMPUTER_USE_STEP_PROMOTION_ENVIRONMENT=main \
 MODAL_COMPUTER_USE_STEP_PROMOTION_CLOUD=aws \
-MODAL_COMPUTER_USE_STEP_PROMOTION_REGION=us-west-2 \
+MODAL_COMPUTER_USE_STEP_PROMOTION_REGION=us-west \
 uv run modal run --env main scripts/run_step_promotion.py \
   --source-sha "$source_sha" \
   --sample-count 100 \
@@ -385,7 +385,7 @@ Use `modal-colocated-client` to measure a runner and target with the same reques
 ```bash
 uv run computer-use benchmark modal-colocated-client \
   --runner-only \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --modal-ingress connect \
   --daemon-http-version 1.1 \
   --runner-path connect \
@@ -409,7 +409,7 @@ for backend in asyncio threaded isolated-asyncio; do
   uv run computer-use benchmark modal-colocated-client \
     --app-name modal-computer-use-subproc-ab \
     --runner-only \
-    --modal-region us-west-2 \
+    --modal-region us-west \
     --modal-ingress attested-tunnel \
     --daemon-http-version 1.1 \
     --runner-path inherited \
@@ -442,7 +442,7 @@ for backend in asyncio threaded isolated-asyncio; do
   uv run computer-use benchmark modal-colocated-client \
     --app-name modal-computer-use-subprocess-ab-1cpu \
     --runner-only \
-    --modal-region us-west-2 \
+    --modal-region us-west \
     --modal-ingress attested-tunnel \
     --daemon-http-version 1.1 \
     --runner-path inherited \
@@ -476,7 +476,7 @@ came from two draws of this command:
 ```bash
 uv run computer-use benchmark modal-colocated-client \
   --app-name modal-computer-use-caller-placement \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --caller-region-label dev-laptop-us-west \
   --modal-ingress attested-tunnel \
   --daemon-http-version 1.1 \
@@ -519,7 +519,7 @@ test -z "$(git status --porcelain)"
 uv run python scripts/publish_modal_images.py --revision "$evidence_harness_sha"
 
 uv run computer-use benchmark modal-action-batching-ab \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --image-revision "$evidence_harness_sha" \
   --modal-cpu 4 \
   --modal-memory-mib 8192 \
@@ -542,7 +542,7 @@ test -z "$(git status --porcelain)"
 uv run python scripts/publish_modal_images.py --revision "$evidence_harness_sha"
 
 uv run computer-use benchmark modal-optimized-ingress-ab \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --image-revision "$evidence_harness_sha" \
   --modal-cpu 4 \
   --modal-memory-mib 8192 \
@@ -565,7 +565,7 @@ the active Modal environment used by the run, as described in
 evidence_harness_sha="$(git rev-parse HEAD)"
 
 uv run computer-use benchmark modal-optimized-provider \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --image-revision "$evidence_harness_sha" \
   --modal-cpu 1 \
   --modal-memory-mib 2048 \
@@ -730,7 +730,7 @@ The single-case observation input was produced with:
 ```bash
 uv run computer-use benchmark modal-colocated-client \
   --runner-only \
-  --modal-region us-west-2 \
+  --modal-region us-west \
   --modal-ingress connect \
   --daemon-http-version 1.1 \
   --runner-path connect \

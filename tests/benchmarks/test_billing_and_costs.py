@@ -130,7 +130,35 @@ def test_modal_billing_request_can_scope_to_environment() -> None:
     )
 
     assert result["source"] == "modal.Environment.billing.report"
-    assert result["environment_name"] == "prod"
+    assert result["scope"] == "environment"
+    assert result["required_tag_count"] == 1
+    assert result["query_tag_count"] == 3
+    assert "environment_name" not in result
+    assert "required_tags" not in result
+    encoded = json.dumps(result)
+    assert "prod" not in encoded
+    assert "sdk_surface_test" not in encoded
+
+
+def test_modal_billing_failure_does_not_expose_private_request_values() -> None:
+    private_environment = "private-modal-environment"
+    private_tag = "private-benchmark-run-id"
+    request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=datetime(2026, 5, 13, 2, 0, tzinfo=UTC),
+        required_tags={"benchmark_run_id": private_tag},
+        environment_name=private_environment,
+    )
+
+    def fail_report(*args) -> list[object]:
+        raise RuntimeError(f"billing failed for {private_environment} and {private_tag}")
+
+    result = benchmark_billing.reconcile_modal_billing(request, report_loader=fail_report)
+
+    assert result["status"] == "failed"
+    encoded = json.dumps(result)
+    assert private_environment not in encoded
+    assert private_tag not in encoded
 
 
 def test_modal_billing_reconciliation_handles_unavailable_and_pending() -> None:

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
+import stat
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +19,7 @@ from modal_computer_use.daemon.app import create_app
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
 from modal_computer_use.errors import ArtifactPathError, BudgetExceededError
+from modal_computer_use.models import ArtifactSyncResult
 
 
 @pytest.mark.parametrize(
@@ -46,6 +52,73 @@ def test_artifact_store_roundtrip(tmp_path) -> None:
     assert info.uri == "artifact://downloads/a.txt"
     assert store.read_bytes("downloads/a.txt") == b"hello"
     assert store.manifest()[0].path == "downloads/a.txt"
+
+
+def test_artifact_store_prepares_private_control_directories(tmp_path) -> None:
+    root = tmp_path / "root"
+    (root / "logs").mkdir(parents=True, mode=0o755)
+
+    ArtifactStore(root)
+
+    for name in ("logs", "traces"):
+        metadata = (root / name).lstat()
+        assert stat.S_ISDIR(metadata.st_mode)
+        assert metadata.st_uid == os.geteuid()
+        assert stat.S_IMODE(metadata.st_mode) == 0o700
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_artifact_store_rejects_unsafe_control_directory(tmp_path, kind: str) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    control = root / "traces"
+    if kind == "file":
+        control.write_text("unsafe", encoding="utf-8")
+    else:
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        control.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ArtifactPathError, match="control directory"):
+        ArtifactStore(root)
+
+
+def test_artifact_upload_supports_symlinked_volume_mount_root(tmp_path) -> None:
+    mounted_root = tmp_path / "mounted-volume"
+    mounted_root.mkdir()
+    configured_root = tmp_path / "artifacts"
+    configured_root.symlink_to(mounted_root, target_is_directory=True)
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=configured_root,
+        recordings_dir=tmp_path / "recordings",
+        local_token="dev",
+    )
+
+    with TestClient(
+        create_app(settings), headers={"Authorization": "Bearer dev"}
+    ) as client:
+        response = client.put("/v1/artifacts/report.txt", content=b"mounted")
+
+    assert response.status_code == 200
+    assert (mounted_root / "report.txt").read_bytes() == b"mounted"
+
+
+def test_artifact_store_pins_symlinked_root_at_initialization(tmp_path) -> None:
+    mounted_root = tmp_path / "mounted-volume"
+    mounted_root.mkdir()
+    replacement_root = tmp_path / "replacement"
+    replacement_root.mkdir()
+    configured_root = tmp_path / "artifacts"
+    configured_root.symlink_to(mounted_root, target_is_directory=True)
+    store = ArtifactStore(configured_root)
+
+    configured_root.unlink()
+    configured_root.symlink_to(replacement_root, target_is_directory=True)
+    store.write_bytes("report.txt", b"pinned")
+
+    assert (mounted_root / "report.txt").read_bytes() == b"pinned"
+    assert not (replacement_root / "report.txt").exists()
 
 
 def test_artifact_manifest_prefix_matches_path_boundary(tmp_path) -> None:
@@ -126,7 +199,6 @@ def test_artifact_symlink_alias_to_control_path_is_rejected(tmp_path) -> None:
 def test_artifact_symlink_parent_alias_to_control_path_is_rejected(tmp_path) -> None:
     store = ArtifactStore(tmp_path / "root")
     trace_dir = tmp_path / "root" / "traces"
-    trace_dir.mkdir()
     (trace_dir / "actions.ndjson").write_text("secret trace")
     (tmp_path / "root" / "alias").symlink_to(trace_dir)
 
@@ -191,7 +263,6 @@ def test_artifact_route_rejects_raw_supervisor_logs(tmp_path) -> None:
     )
     app = create_app(settings)
     log_path = settings.artifacts_dir / "logs" / "xvfb.log"
-    log_path.parent.mkdir(parents=True)
     log_path.write_text("Bearer raw-log-secret\n", encoding="utf-8")
 
     with TestClient(app, headers={"Authorization": "Bearer dev"}) as client:
@@ -400,6 +471,42 @@ def test_artifact_sync_reports_noop_without_persistence(tmp_path) -> None:
     assert result.persistent is False
     assert result.synced_paths == []
     assert "no-op" in (result.message or "")
+
+
+def test_artifact_sync_route_runs_mountpoint_sync_off_event_loop(tmp_path) -> None:
+    settings = DaemonSettings(
+        backend="mock",
+        artifacts_dir=tmp_path / "artifacts",
+        recordings_dir=tmp_path / "recordings",
+        runtime_dir=tmp_path / "runtime",
+        local_token="dev",
+    )
+    app = create_app(settings)
+    sync_thread_ids: list[int] = []
+
+    def sync() -> ArtifactSyncResult:
+        sync_thread_ids.append(threading.get_ident())
+        return ArtifactSyncResult(ok=True, persistent=True, synced_paths=["artifact-root"])
+
+    app.state.artifacts.sync = sync
+
+    async def exercise() -> int:
+        event_loop_thread_id = threading.get_ident()
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer dev"},
+            ) as client:
+                response = await client.post("/v1/artifacts/sync")
+        assert response.status_code == 200
+        return event_loop_thread_id
+
+    event_loop_thread_id = asyncio.run(exercise())
+
+    assert sync_thread_ids
+    assert all(thread_id != event_loop_thread_id for thread_id in sync_thread_ids)
 
 
 def test_artifact_sync_runs_mountpoint_sync_for_persistent_volume(tmp_path) -> None:

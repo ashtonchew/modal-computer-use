@@ -50,7 +50,7 @@ class X11BrowserController:
 
     async def open_url(self, url: str, wait_for_window: bool = True) -> ActionResult:
         command = browser_command(self.browser)
-        profile_dir = ensure_browser_profile(self.profile_dir)
+        profile_dir = await asyncio.to_thread(ensure_browser_profile, self.profile_dir)
         args = browser_launch_args(
             self.browser,
             url,
@@ -91,7 +91,7 @@ class X11BrowserController:
             }
         command = browser_command(self.browser)
         executable = command
-        profile_dir = ensure_browser_profile(self.profile_dir)
+        profile_dir = await asyncio.to_thread(ensure_browser_profile, self.profile_dir)
         try:
             return await asyncio.to_thread(
                 measure_chromium_render_metrics,
@@ -165,7 +165,22 @@ def browser_launch_args(
 
 def ensure_browser_profile(profile_dir: str | None) -> str:
     resolved = profile_dir or DEFAULT_BROWSER_PROFILE_DIR
-    Path(resolved).mkdir(parents=True, exist_ok=True)
+    arguments = ("install", "-d", "-m", "0700", "--", resolved)
+    environment = desktop_process_environment(display=os.getenv("DISPLAY", ":99"))
+    command = desktop_process_command(*arguments, environ=environment)
+    if command == arguments:
+        path = Path(resolved)
+        path.mkdir(parents=True, mode=0o700, exist_ok=True)
+        path.chmod(0o700)
+    else:
+        subprocess.run(  # noqa: S603 - fixed utility and validated configured path.
+            command,
+            check=True,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     return resolved
 
 

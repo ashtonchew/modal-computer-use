@@ -78,8 +78,12 @@ class HTTPTransport:
         params: Mapping[str, Any] | None = None,
         content: bytes | None = None,
         headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         request_headers = self._request_headers(headers, path=path)
+        request_options: dict[str, Any] = {}
+        if timeout is not None:
+            request_options["timeout"] = timeout
         with self._tracer.span(
             "sdk.request",
             {
@@ -94,6 +98,7 @@ class HTTPTransport:
                 params=params,
                 content=content,
                 headers=request_headers,
+                **request_options,
             )
             self.last_http_version = response.http_version
             span.set_attribute("http.status_code", response.status_code)
@@ -332,8 +337,12 @@ class AsyncHTTPTransport:
         params: Mapping[str, Any] | None = None,
         content: bytes | None = None,
         headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
         request_headers = self._request_headers(headers, path=path)
+        request_options: dict[str, Any] = {}
+        if timeout is not None:
+            request_options["timeout"] = timeout
         with self._tracer.span(
             "sdk.request",
             {
@@ -348,6 +357,7 @@ class AsyncHTTPTransport:
                 params=params,
                 content=content,
                 headers=request_headers,
+                **request_options,
             )
             self.last_http_version = response.http_version
             span.set_attribute("http.status_code", response.status_code)

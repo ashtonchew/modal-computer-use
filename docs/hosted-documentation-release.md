@@ -5,7 +5,7 @@ Audience: documentation and release maintainers.
 This record defines how the project previews, publishes, and rolls back the hosted
 documentation. It does not publish content.
 
-The details below were verified on 2026-08-08.
+The details below were verified on 2026-08-26.
 
 ## System of record
 
@@ -24,26 +24,23 @@ documentation repository owns the public site structure and content.
 site after a change reaches `main`. The production owner must also retain administrator access to
 the Mintlify deployment and its Git settings.
 
-The `main` branch had no GitHub branch protection on 2026-08-08. The steps in this record are the
-release policy, but GitHub did not enforce them. Protect `main` before the cutover. Require the
-documentation check and a reviewed pull request. Do not allow a direct push to publish the
-cutover.
+The documentation repository publishes from protected `main`. Keep its documentation check and
+pull-request gate enabled; do not use a direct push to bypass a failed release check.
 
 ## Current production baseline
 
-- **Released SDK described by the checks:** `modal-computer-use[modal]==1.1.0`
-- **Last known good revision:** `5d0f4e2f82ef0906d4cb4a6cc4eeafe018dceb2e`
-- **Successful deployment record:** GitHub deployment `5757927475`
+- **Released SDK described by the checks:** `modal-computer-use[modal]==2.0.0`
+- **Last known good revision:** `73461e8ef563e4ab372c6f051f8f142d7c5e84f2`
+- **Successful deployment record:** the successful Mintlify deployment for that revision
 - **Verified production URL:** `https://modal-computer-use.mintlify.app`
 
-GitHub recorded the deployment as successful on 2026-08-05. The deployment points to the last
-known good revision above. Use that full revision as the rollback baseline for the optimized-path
-cutover.
+The production deployment points to the last known good revision above. Use that full revision as
+the patch-release documentation rollback baseline.
 
-The repository had no tag or rollback branch for this revision on 2026-08-08. Before publication,
-create the annotated tag `docs-v1.1.0-last-known-good` at the revision above. If `main` changes
-before the cutover, replace the baseline with the latest revision that has a successful deployment
-to the production URL. Record both revisions in the cutover pull request.
+The annotated `docs-v1.1.0-last-known-good` tag remains the major-version rollback baseline. If
+`main` changes before publication, replace the patch baseline above with the latest revision that
+has a successful deployment to the production URL and record both revisions in the release pull
+request.
 
 ## Preview a change
 
@@ -94,14 +91,9 @@ Mintlify describes the GitHub integration in its
 
 ## Version navigation
 
-The production `docs.json` did not define `navigation.versions` on 2026-08-08. The live site was
-therefore unversioned.
-
-The semver-major cutover must add a version selector before publication. Use Mintlify's
-`navigation.versions` interface. Keep the new major version as `2.x` with a `Latest` tag. Keep the
-last version of the prior interface as `1.x` with a `Previous` tag. The `2.x` entry may keep the
-current route paths. Store the preserved `1.x` pages below a stable `v1/` path. Do not redirect the
-preserved pages to `2.x`.
+Production `docs.json` defines `navigation.versions`: `2.x` is tagged `Latest`, while `1.x` is
+tagged `Previous` and retained below the stable `v1/` path. Patch releases update `2.x` in place;
+they do not rewrite or redirect the preserved `1.x` pages.
 
 The version selector is a release requirement, not an automatic copy of Git history. The
 documentation cutover task must preserve and test the `1.x` page tree. It must also test links and

@@ -43,6 +43,32 @@ ASYNC_NAMESPACE_NAMES = (
 
 
 @pytest.mark.asyncio
+async def test_async_http_transport_applies_per_request_timeout_override() -> None:
+    observed: list[float] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.extensions["timeout"]["read"])
+        return httpx.Response(
+            200,
+            json={"ok": True, "persistent": True, "synced_paths": ["artifact-root"]},
+        )
+
+    http_client = httpx.AsyncClient(
+        base_url="https://daemon.example",
+        transport=httpx.MockTransport(handler),
+        timeout=30.0,
+    )
+    async with AsyncDaemonClient(
+        "https://daemon.example",
+        transport=AsyncHTTPTransport("https://daemon.example", client=http_client),
+    ) as client:
+        result = await client.artifacts.sync()
+
+    assert result.ok is True
+    assert observed == [60.0]
+
+
+@pytest.mark.asyncio
 async def test_async_http_transport_reuses_client_and_injects_private_metadata(
     tmp_path: Path,
 ) -> None:

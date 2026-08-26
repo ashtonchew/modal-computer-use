@@ -4,13 +4,24 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modal-computer-use"
-version = "2.0.0"
+version = "2.0.1"
 description = "Daemon-first Modal-native computer-use primitives for Linux desktops"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "modal-computer-use contributors" }]
+keywords = ["computer-use", "modal", "sandbox", "desktop-automation"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
 dependencies = [
   "anyio>=4",
   "fastapi>=0.141.1",

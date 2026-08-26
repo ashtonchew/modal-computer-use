@@ -19,6 +19,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .._regions import is_verifiable_modal_region_selector
 from ..daemon.input_rate_limit import INPUT_RATE_LIMIT_POLICY, batch_input_token_cost
 from ..models import parse_action
 
@@ -34,7 +35,6 @@ DEFAULT_CYCLES_PER_BATCH = 6
 DEFAULT_MAX_TAIL_REGRESSION = 1.5
 DEFAULT_MAX_CPU_SECONDS_PER_TOKEN = 0.02
 DEFAULT_MAX_RSS_GROWTH_BYTES = 128 * 1024 * 1024
-_EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _RESOURCE_SAMPLE_SCRIPT = """
 import glob, json, os, pathlib
 membership = pathlib.Path("/proc/self/cgroup").read_text(encoding="utf-8")
@@ -124,8 +124,10 @@ class InputCapacitySettings:
     def validate(self, *, batch_cost: int | None = None) -> None:
         if self.requested_cloud not in {"aws", "azure", "gcp", "oci"}:
             raise ValueError("requested cloud must be explicit and supported")
-        if _EXACT_REGION.fullmatch(self.requested_region) is None:
-            raise ValueError("requested region must be one exact provider region")
+        if not is_verifiable_modal_region_selector(self.requested_region):
+            raise ValueError(
+                "requested region must be one verifiable narrow or granted granular region"
+            )
         if len(self.source_sha) != 40 or any(
             char not in "0123456789abcdef" for char in self.source_sha
         ):

@@ -72,7 +72,7 @@ tracked artifact eligibility, and the [archive policy](archive/README.md) define
 - [Code of conduct](../CODE_OF_CONDUCT.md): follow the community behavior and reporting policy.
 - [Release checklist](release-checklist.md): maintainer verification, packaging, protected smoke
   tests, and release review.
-- [Version 2 release candidate](v2-release-candidate.md): maintainer record for release identity,
+- [Version 2 release record](v2-release-candidate.md): maintainer record for release identity,
   package and runtime order, gates, and rollback.
 - [Hosted documentation release system](hosted-documentation-release.md): maintainer record for
   source ownership, previews, publication, version navigation, and rollback.

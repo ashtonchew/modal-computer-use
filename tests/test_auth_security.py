@@ -725,7 +725,6 @@ def test_command_run_executes_under_input_lock(tmp_path) -> None:
 
 def test_process_log_routes_sanitize_secret_bearing_tails(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
-    app.state.supervisor.log_dir.mkdir(parents=True)
     (app.state.supervisor.log_dir / "xvfb.log").write_text(
         "safe\nBearer log-secret\n",
     )
@@ -751,7 +750,6 @@ def test_process_log_routes_sanitize_secret_bearing_tails(tmp_path) -> None:
 
 def test_process_log_tail_query_is_bounded(tmp_path) -> None:
     app = _app(tmp_path, local_token="dev")
-    app.state.supervisor.log_dir.mkdir(parents=True)
     (app.state.supervisor.log_dir / "xvfb.log").write_text(
         "\n".join(f"line-{index}" for index in range(5)),
     )

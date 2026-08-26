@@ -8,6 +8,8 @@ from modal_computer_use.models import ArtifactInfo, ArtifactSyncResult
 
 from .base import AsyncNamespace, Namespace
 
+_ARTIFACT_SYNC_REQUEST_TIMEOUT_SECONDS = 60.0
+
 
 def _artifact_url(path: str) -> str:
     safe = normalize_artifact_path(path)
@@ -51,7 +53,11 @@ class ArtifactsNamespace(Namespace):
 
     def sync(self) -> ArtifactSyncResult:
         return ArtifactSyncResult.model_validate(
-            self._client.post_json("/v1/artifacts/sync", _mutation=True)
+            self._client.post_json(
+                "/v1/artifacts/sync",
+                _mutation=True,
+                _timeout=_ARTIFACT_SYNC_REQUEST_TIMEOUT_SECONDS,
+            )
         )
 
 
@@ -94,5 +100,9 @@ class AsyncArtifactsNamespace(AsyncNamespace):
 
     async def sync(self) -> ArtifactSyncResult:
         return ArtifactSyncResult.model_validate(
-            await self._client.post_json("/v1/artifacts/sync", _mutation=True)
+            await self._client.post_json(
+                "/v1/artifacts/sync",
+                _mutation=True,
+                _timeout=_ARTIFACT_SYNC_REQUEST_TIMEOUT_SECONDS,
+            )
         )

@@ -14,9 +14,10 @@ def test_v2_release_identity_is_coherent() -> None:
     openapi = json.loads((ROOT / "docs/openapi.json").read_text(encoding="utf-8"))
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert project["project"]["version"] == "2.0.0"
-    assert '__version__ = "2.0.0"' in runtime
-    assert openapi["info"]["version"] == "2.0.0"
+    assert project["project"]["version"] == "2.0.1"
+    assert '__version__ = "2.0.1"' in runtime
+    assert openapi["info"]["version"] == "2.0.1"
+    assert "## 2.0.1 - 2026-08-26" in changelog
     assert "## 2.0.0 - 2026-08-10" in changelog
 
 
@@ -31,7 +32,7 @@ def test_v2_changelog_contains_the_exact_migration_contract() -> None:
     for required_term in (
         "ComputerSessionHandle",
         "borrow_async",
-        "exact region",
+        "supported narrow selector",
         'screenshots.full(storage="inline")',
         "one `actions.run(...)` HTTP batch",
         "never replay automatically",
@@ -43,8 +44,9 @@ def test_v2_changelog_contains_the_exact_migration_contract() -> None:
 def test_release_record_keeps_publication_gated_and_records_rollback() -> None:
     record = (ROOT / "docs/v2-release-candidate.md").read_text(encoding="utf-8")
 
-    assert "Status: live-verified branch candidate; not published" in record
-    assert "modal-computer-use==1.1.0" in record
+    assert "Status: version 2 is published" in record
+    assert "releases/latest" in record
+    assert "modal-computer-use==2.0.0" in record
     assert "docs-v1.1.0-last-known-good" in record
     assert "never silently downgrades" in record
     assert "runtime artifacts → package → hosted documentation" in record

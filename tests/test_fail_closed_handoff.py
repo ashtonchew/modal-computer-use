@@ -33,7 +33,7 @@ def _handle(*, requested_region: str = "us-west") -> ComputerSessionHandle:
 def _placed_modal_function(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MODAL_IS_REMOTE", "1")
     monkeypatch.setenv("MODAL_ENVIRONMENT", "prod")
-    monkeypatch.setenv("MODAL_REGION", "us-west-2")
+    monkeypatch.setenv("MODAL_REGION", "us-west")
 
 
 def test_missing_declared_function_placement_has_a_typed_outcome(
@@ -94,7 +94,7 @@ def test_broad_function_selector_is_unverifiable_before_target_attachment(
 
     with (
         pytest.raises(SessionCompatibilityError) as raised,
-        _handle().borrow(run_id="run-123", function_region="us-west"),
+        _handle(requested_region="us").borrow(run_id="run-123", function_region="us"),
     ):
         raise AssertionError("unreachable")
 
@@ -115,9 +115,9 @@ def test_missing_observed_function_region_fails_before_target_attachment(
 
     with (
         pytest.raises(SessionCompatibilityError) as raised,
-        _handle(requested_region="us-west-2").borrow(
+        _handle().borrow(
             run_id="run-123",
-            function_region="us-west-2",
+            function_region="us-west",
         ),
     ):
         raise AssertionError("unreachable")
@@ -152,7 +152,7 @@ def test_malformed_observed_function_region_fails_before_target_attachment(
 def test_broad_observed_function_region_is_unverifiable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MODAL_REGION", "us-west")
+    monkeypatch.setenv("MODAL_REGION", "us")
     monkeypatch.setattr(
         "modal_computer_use.sandbox._borrow_modal_function_session",
         lambda *_args, **_kwargs: pytest.fail(
@@ -162,9 +162,9 @@ def test_broad_observed_function_region_is_unverifiable(
 
     with (
         pytest.raises(SessionCompatibilityError) as raised,
-        _handle(requested_region="us-west-2").borrow(
+        _handle().borrow(
             run_id="run-123",
-            function_region="us-west-2",
+            function_region="us-west",
         ),
     ):
         raise AssertionError("unreachable")
@@ -193,3 +193,26 @@ def test_observed_function_region_mismatch_is_distinct_from_unverifiable(
         raise AssertionError("unreachable")
 
     assert type(raised.value).__name__ == "SessionPlacementMismatchError"
+
+
+def test_observed_concrete_function_region_matches_public_narrow_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReachedTargetAttachment(RuntimeError):
+        pass
+
+    monkeypatch.setenv("MODAL_REGION", "us-west1")
+
+    def reached_target(*_args: object, **_kwargs: object) -> object:
+        raise ReachedTargetAttachment
+
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._borrow_modal_function_session",
+        reached_target,
+    )
+
+    with pytest.raises(ReachedTargetAttachment), _handle().borrow(
+        run_id="run-123",
+        function_region="us-west",
+    ):
+        raise AssertionError("unreachable")

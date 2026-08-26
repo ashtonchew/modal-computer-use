@@ -17,6 +17,7 @@ from typing import Any, cast
 from PIL import Image
 
 from modal_computer_use.artifacts import ArtifactStore
+from modal_computer_use.daemon.process_environment import prepare_desktop_output_file
 from modal_computer_use.models import (
     CoordinateSpace,
     Point,
@@ -480,6 +481,7 @@ class X11ScreenshotController:
         timings_ms: dict[str, float],
     ) -> tuple[bytes, int, int, str]:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+            prepare_desktop_output_file(handle.fileno())
             temp_path = Path(handle.name)
         try:
             started = perf_counter()

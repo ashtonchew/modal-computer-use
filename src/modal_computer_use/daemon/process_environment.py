@@ -6,10 +6,9 @@ import shutil
 from collections.abc import Mapping
 
 _SECRET_MARKERS = ("_CREDENTIAL", "_PASSWORD", "_SECRET", "_TOKEN")
-DAEMON_USER_ENV = "COMPUTER_USE_DAEMON_USER"
+DAEMON_CONTROLLER_ENV = "COMPUTER_USE_DAEMON_CONTROLLER"
 DESKTOP_USER_ENV = "COMPUTER_USE_DESKTOP_USER"
 VNC_SECRET_DIR_ENV = "COMPUTER_USE_VNC_SECRET_DIR"  # noqa: S105 - environment key, not a secret.
-DAEMON_SERVICE_USER = "computer-daemon"
 DESKTOP_USER = "computer-desktop"
 SHARED_PROCESS_GROUP = "computer-use"
 
@@ -43,10 +42,10 @@ def desktop_process_command(
     """Run a desktop child under the image's non-daemon UID.
 
     Managed Images set ``COMPUTER_USE_DESKTOP_USER`` to a dedicated account.
-    The daemon runs as the service account and uses the root-owned ``sudo``
-    policy baked into that image to cross into the desktop account. Local and
+    Their daemon is the root lifecycle controller so it can drop each desktop
+    child to that account even when Modal enforces ``no_new_privs``. Local and
     custom images leave the marker unset, preserving their existing command
-    shape. Never silently fall back to the daemon UID when the marker is set.
+    shape. Never silently run a managed desktop child as the controller.
     """
 
     if not args:
@@ -55,13 +54,46 @@ def desktop_process_command(
     user = source.get(DESKTOP_USER_ENV)
     if not user or os.name != "posix":
         return tuple(args)
-    target_uid = _require_user_uid(user, role="desktop")
+    target_uid, target_gid = _require_user_identity(user, role="desktop")
     if os.geteuid() == target_uid:
         return tuple(args)
-    # Keep the wrapper explicit and non-interactive. A missing sudo policy or
-    # account causes the child to fail instead of running with daemon rights.
-    sudo = shutil.which("sudo") or "sudo"
-    return (sudo, "-n", "-H", "-u", user, "--", *args)
+    if os.geteuid() != 0:
+        raise RuntimeError("managed desktop command requires the managed root controller")
+    setpriv = shutil.which("setpriv") or "setpriv"
+    return (
+        setpriv,
+        f"--reuid={target_uid}",
+        f"--regid={target_gid}",
+        "--init-groups",
+        "--",
+        *args,
+    )
+
+
+def prepare_desktop_output_file(
+    file_descriptor: int,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Grant a managed desktop child write access without making it file owner.
+
+    Root keeps ownership so another process with the desktop UID cannot replace
+    the path in a sticky temporary directory. The desktop account receives only
+    group read/write access to the already-open output file.
+    """
+
+    source = os.environ if environ is None else environ
+    user = source.get(DESKTOP_USER_ENV)
+    if not user or os.name != "posix":
+        return
+    target_uid, target_gid = _require_user_identity(user, role="desktop")
+    current_uid = os.geteuid()
+    if current_uid == target_uid:
+        return
+    if current_uid != 0:
+        raise RuntimeError("managed desktop output requires the managed root controller")
+    os.fchown(file_descriptor, 0, target_gid)
+    os.fchmod(file_descriptor, 0o660)
 
 
 def daemon_process_command(
@@ -69,12 +101,14 @@ def daemon_process_command(
     environ: Mapping[str, str] | None = None,
     managed_image: bool = False,
 ) -> tuple[str, ...]:
-    """Build a daemon launcher whose UID decision runs inside the Image.
+    """Build a daemon launcher whose controller check runs inside the Image.
 
     ``managed_image`` is selected by the SDK from the image source, not from
-    caller environment values. The shell trampoline evaluates the baked image
-    marker in-container and fails closed when a managed release predates the
-    credential boundary. Account resolution never occurs on the caller machine.
+    caller environment values. The shell trampoline evaluates the baked marker
+    in-container and fails closed unless the managed daemon retains the root
+    authority required to drop every GUI child to the desktop account. This is
+    compatible with Modal's ``no_new_privs`` runtime boundary; attempting to
+    regain privilege from a non-root daemon is not.
     """
 
     if not args:
@@ -82,13 +116,14 @@ def daemon_process_command(
     del environ
     if not managed_image:
         return tuple(args)
-    # ``$@`` is expanded only in the image. No caller-controlled values or
-    # bearer secrets are interpolated into the script or launcher argv.
+    # ``$@`` and the marker are expanded only in the image. No caller-controlled
+    # values or bearer secrets are interpolated into the script or launcher argv.
     trampoline = (
-        'if [ -n "$COMPUTER_USE_DAEMON_USER" ]; then '
-        'exec setpriv --reuid="$COMPUTER_USE_DAEMON_USER" '
-        '--regid="$COMPUTER_USE_DAEMON_USER" --init-groups -- "$@"; '
-        "else echo 'managed image credential boundary is unavailable' >&2; exit 78; fi"
+        'if [ "$COMPUTER_USE_DAEMON_CONTROLLER" != "root" ]; then '
+        "echo 'managed image credential boundary is unavailable' >&2; exit 78; "
+        'elif [ "$(id -u)" -ne 0 ]; then '
+        "echo 'managed image root controller is unavailable' >&2; exit 77; "
+        'else exec "$@"; fi'
     )
     return (
         "sh",
@@ -99,18 +134,19 @@ def daemon_process_command(
     )
 
 
-def _desktop_user_uid(user: str) -> int | None:
+def _desktop_user_identity(user: str) -> tuple[int, int] | None:
     try:
-        return pwd.getpwnam(user).pw_uid
+        account = pwd.getpwnam(user)
     except KeyError:
         return None
+    return account.pw_uid, account.pw_gid
 
 
-def _require_user_uid(user: str, *, role: str) -> int:
-    target_uid = _desktop_user_uid(user)
-    if target_uid is None:
+def _require_user_identity(user: str, *, role: str) -> tuple[int, int]:
+    identity = _desktop_user_identity(user)
+    if identity is None:
         raise RuntimeError(f"configured {role} user does not exist: {user}")
-    return target_uid
+    return identity
 
 
 def _is_daemon_secret_name(name: str) -> bool:

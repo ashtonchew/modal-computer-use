@@ -29,6 +29,7 @@ from typing import Any, Protocol
 import modal
 
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig, ComputerSessionHandle
+from modal_computer_use._regions import is_verifiable_modal_region_selector
 from modal_computer_use.benchmarks.step_promotion_gate import (
     CANDIDATE_ARM,
     MINIMUM_SAMPLES_PER_ARM,
@@ -51,7 +52,7 @@ OWNER = os.environ.get(
 )
 MODAL_ENVIRONMENT = os.environ.get("MODAL_COMPUTER_USE_STEP_PROMOTION_ENVIRONMENT", "main")
 CLOUD = os.environ.get("MODAL_COMPUTER_USE_STEP_PROMOTION_CLOUD", "aws")
-REGION = os.environ.get("MODAL_COMPUTER_USE_STEP_PROMOTION_REGION", "us-west-2")
+REGION = os.environ.get("MODAL_COMPUTER_USE_STEP_PROMOTION_REGION", "us-west")
 FUNCTION_CPU = 1.0
 FUNCTION_MEMORY_MIB = 2048
 FUNCTION_MIN_CONTAINERS = 0
@@ -65,7 +66,6 @@ SANDBOX_WARM_POOL_CAPACITY = 0
 INPUT_RATE_LIMIT_PER_SEC = 20
 OPERATION_PACING_SECONDS = 0.125
 ACTION_BATCH = ({"type": "click", "x": 512, "y": 384, "button": "left"},)
-_EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _SOURCE_SHA = re.compile(r"^[0-9a-f]{40}$")
 _OBSERVED_CLOUD_LABELS = {
     "CLOUD_PROVIDER_AWS": "aws",
@@ -104,8 +104,10 @@ class StepPromotionSettings:
         ):
             if not value.strip():
                 raise ValueError(f"{name} must be non-empty")
-        if _EXACT_REGION.fullmatch(self.region) is None:
-            raise ValueError("region must be one exact Modal region")
+        if not is_verifiable_modal_region_selector(self.region):
+            raise ValueError(
+                "region must be one verifiable narrow or granted granular Modal region"
+            )
         if _SOURCE_SHA.fullmatch(self.source_sha) is None:
             raise ValueError("source_sha must be one full Git SHA")
         if self.sample_count < MINIMUM_SAMPLES_PER_ARM:

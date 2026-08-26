@@ -13,6 +13,7 @@ from modal_computer_use.daemon.process_environment import (
     daemon_process_command,
     desktop_process_command,
     desktop_process_environment,
+    prepare_desktop_output_file,
 )
 from modal_computer_use.daemon.settings import DaemonSettings
 from modal_computer_use.daemon.supervisor import Supervisor
@@ -244,7 +245,7 @@ def test_borrowed_surfaces_preserve_apps_and_commands_contract() -> None:
     assert hasattr(async_, "commands")
 
 
-def test_desktop_process_command_preserves_boundary_marker(monkeypatch) -> None:
+def test_desktop_process_command_drops_from_root_controller(monkeypatch) -> None:
     env = desktop_process_environment(display=":99", environ={
         "COMPUTER_USE_DESKTOP_USER": "computer-desktop",
         "COMPUTER_USE_TUNNEL_TOKEN": "secret",
@@ -252,21 +253,66 @@ def test_desktop_process_command_preserves_boundary_marker(monkeypatch) -> None:
     assert "COMPUTER_USE_TUNNEL_TOKEN" not in env
     monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.name", "posix")
     monkeypatch.setattr(
-        "modal_computer_use.daemon.process_environment._desktop_user_uid", lambda _: 1234
+        "modal_computer_use.daemon.process_environment._desktop_user_identity",
+        lambda _: (1234, 2345),
     )
     monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "modal_computer_use.daemon.process_environment.shutil.which",
+        lambda name: "/usr/bin/setpriv" if name == "setpriv" else None,
+    )
 
     command = desktop_process_command("sh", "-c", "id", environ=env)
 
-    assert command[0].endswith("/sudo")
-    assert command[1:5] == ("-n", "-H", "-u", "computer-desktop")
+    assert command[0] == "/usr/bin/setpriv"
+    assert command[1:5] == ("--reuid=1234", "--regid=2345", "--init-groups", "--")
     assert command[-3:] == ("sh", "-c", "id")
 
 
-def test_daemon_process_command_uses_setpriv_without_secret_argv(monkeypatch) -> None:
+def test_desktop_process_command_fails_closed_without_root_or_target_uid(monkeypatch) -> None:
+    monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.name", "posix")
+    monkeypatch.setattr(
+        "modal_computer_use.daemon.process_environment._desktop_user_identity",
+        lambda _: (1234, 2345),
+    )
+    monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.geteuid", lambda: 1900)
+
+    with pytest.raises(RuntimeError, match="requires the managed root controller"):
+        desktop_process_command(
+            "true",
+            environ={"COMPUTER_USE_DESKTOP_USER": "computer-desktop"},
+        )
+
+
+def test_desktop_output_file_keeps_root_owner_and_grants_desktop_group(monkeypatch) -> None:
+    calls: list[tuple[str, int, int, int | None]] = []
+    monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.name", "posix")
+    monkeypatch.setattr(
+        "modal_computer_use.daemon.process_environment._desktop_user_identity",
+        lambda _: (1234, 2345),
+    )
+    monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "modal_computer_use.daemon.process_environment.os.fchown",
+        lambda fd, uid, gid: calls.append(("chown", fd, uid, gid)),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.daemon.process_environment.os.fchmod",
+        lambda fd, mode: calls.append(("chmod", fd, mode, None)),
+    )
+
+    prepare_desktop_output_file(
+        17,
+        environ={"COMPUTER_USE_DESKTOP_USER": "computer-desktop"},
+    )
+
+    assert calls == [("chown", 17, 0, 2345), ("chmod", 17, 0o660, None)]
+
+
+def test_daemon_process_command_uses_root_controller_without_secret_argv(monkeypatch) -> None:
     monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.name", "nt")
     monkeypatch.setattr(
-        "modal_computer_use.daemon.process_environment._desktop_user_uid",
+        "modal_computer_use.daemon.process_environment._desktop_user_identity",
         lambda _: (_ for _ in ()).throw(AssertionError("remote account must not be resolved")),
     )
     monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.geteuid", lambda: 0)
@@ -280,16 +326,20 @@ def test_daemon_process_command_uses_setpriv_without_secret_argv(monkeypatch) ->
         "-m",
         "modal_computer_use.daemon",
         environ={
-            "COMPUTER_USE_DAEMON_USER": "computer-daemon",
+            "COMPUTER_USE_DAEMON_CONTROLLER": "root",
             "COMPUTER_USE_TUNNEL_TOKEN": "bootstrap-secret",
         },
         managed_image=True,
     )
 
     assert command[:2] == ("sh", "-c")
-    assert "COMPUTER_USE_DAEMON_USER" in command[2]
+    assert "COMPUTER_USE_DAEMON_CONTROLLER" in command[2]
+    assert "id -u" in command[2]
+    assert "setpriv" not in command[2]
     assert "credential boundary is unavailable" in command[2]
     assert "exit 78" in command[2]
+    assert "root controller is unavailable" in command[2]
+    assert "exit 77" in command[2]
     assert command[3] == "modal-computer-use-daemon"
     assert "bootstrap-secret" not in command
     assert daemon_process_command("python", "-m", "daemon") == ("python", "-m", "daemon")
@@ -298,7 +348,7 @@ def test_daemon_process_command_uses_setpriv_without_secret_argv(monkeypatch) ->
 def test_configured_missing_desktop_user_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr("modal_computer_use.daemon.process_environment.os.name", "posix")
     monkeypatch.setattr(
-        "modal_computer_use.daemon.process_environment._desktop_user_uid", lambda _: None
+        "modal_computer_use.daemon.process_environment._desktop_user_identity", lambda _: None
     )
 
     with pytest.raises(RuntimeError, match="configured desktop user does not exist"):
@@ -311,17 +361,17 @@ def test_configured_missing_desktop_user_fails_closed(monkeypatch) -> None:
 def test_credential_boundary_recipe_limits_shared_paths() -> None:
     commands = "\n".join(_credential_boundary_commands())
 
-    assert "uid 1900" in commands
     assert "uid 1901" in commands
     assert "computer-use" in commands
     assert "/home/desktop/artifacts" in commands
     assert "/home/desktop/recordings" in commands
-    assert "/home/desktop/artifacts/traces" in commands
+    assert "/home/desktop/artifacts/traces" not in commands
     assert "/var/lib/computer-daemon/runtime" in commands
     assert "/var/lib/computer-daemon/vnc" in commands
     assert "3770" in commands
     assert "COMPUTER_USE_*" not in commands
-    assert "DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS" in commands
+    assert "sudoers" not in commands
+    assert "-o root" in commands
 
 
 def test_owner_proof_transport_header_is_scoped_to_owner_mutations() -> None:

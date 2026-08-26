@@ -134,31 +134,76 @@ def test_benchmark_sdk_modal_billing_tag_must_be_key_value(capsys) -> None:
     assert exc_info.value.code == 2
     assert "--modal-billing-tag must be key=value" in captured.err
 
+
+@pytest.mark.parametrize(
+    "target_args",
+    [
+        ["sdk", "--mock-local", "--surfaces", "daemon-http"],
+        ["compare", "--mock-local", "--providers", "modal-daemon"],
+    ],
+)
+def test_benchmark_cli_keeps_private_billing_selectors_out_of_output(
+    monkeypatch, capsys, target_args: list[str]
+) -> None:
+    private_tag = "private-benchmark-run-id"
+    private_environment = "private-modal-environment"
+    private_tag_name = "private-billing-selector"
+    monkeypatch.setattr(
+        benchmark_billing,
+        "_load_modal_billing_report",
+        lambda *args, **kwargs: [],
+    )
+    command = [
+        "benchmark",
+        *target_args,
+        "--iterations",
+        "1",
+        "--modal-billing-reconcile",
+        "--modal-billing-start",
+        "2026-05-13T01:00:00Z",
+        "--modal-billing-tag",
+        f"benchmark_run_id={private_tag}",
+        "--modal-billing-tag-name",
+        private_tag_name,
+    ]
+    if target_args[0] == "sdk":
+        command.extend(["--modal-billing-environment", private_environment])
+
+    exit_code = cli.main(command)
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert private_tag not in output
+    assert private_environment not in output
+    assert private_tag_name not in output
+
+
 def test_benchmark_sdk_modal_billing_default_end_resolves_during_reconciliation(
     monkeypatch,
 ) -> None:
     seen = {}
 
-    def fake_reconcile(metadata):
-        seen["request"] = metadata["modal_billing_reconciliation"]
+    def fake_reconcile(request):
+        seen["request"] = request
         return {"status": "not_available_yet"}
 
     monkeypatch.setattr(
         benchmark_daemon_surface,
-        "reconcile_modal_billing_from_metadata",
+        "reconcile_modal_billing",
         fake_reconcile,
     )
 
+    billing_request = benchmark_billing.modal_billing_reconciliation_request(
+        start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
+        end=None,
+        required_tags={"benchmark_run_id": "sdk_surface_test"},
+    )
     payload = run_sdk_surface_benchmark_mock_local(
         surfaces=["daemon-http"],
         iterations=1,
-        environment_metadata={
-            "modal_billing_reconciliation": benchmark_billing.modal_billing_reconciliation_request(
-                start=datetime(2026, 5, 13, 1, 0, tzinfo=UTC),
-                end=None,
-                required_tags={"benchmark_run_id": "sdk_surface_test"},
-            )
-        },
+        billing_reconciliation_request=billing_request,
     )
 
     assert payload["surfaces"]["daemon-http"]["billing_reconciliation"]["status"] == (
@@ -174,16 +219,14 @@ def test_daemon_http_surface_attaches_billing_reconciliation_separately(monkeypa
     }
     monkeypatch.setattr(
         benchmark_daemon_surface,
-        "reconcile_modal_billing_from_metadata",
-        lambda metadata: reconciliation,
+        "reconcile_modal_billing",
+        lambda request: reconciliation,
     )
 
     payload = run_sdk_surface_benchmark_mock_local(
         surfaces=["daemon-http"],
         iterations=1,
-        environment_metadata={
-            "modal_billing_reconciliation": {"start": "2026-05-13T01:00:00Z"},
-        },
+        billing_reconciliation_request={"start": "2026-05-13T01:00:00Z"},
     )
 
     surface = payload["surfaces"]["daemon-http"]

@@ -24,6 +24,7 @@ CONTROL_PATHS = {
     "traces/actions.ndjson",
 }
 CONTROL_SEGMENTS = {".control", "_control", ".modal-computer-use", ".secrets", "logs"}
+PRIVATE_CONTROL_DIRECTORIES = ("logs", "traces")
 
 
 def normalize_artifact_path(path: str, *, allow_empty: bool = False, public: bool = True) -> str:
@@ -74,16 +75,54 @@ class ArtifactStore:
         self.max_total_bytes = max_total_bytes
         self._sync_runner = sync_runner or _run_mountpoint_sync
         self.root.mkdir(parents=True, exist_ok=True)
+        self._resolved_root = self.root.resolve(strict=True)
+        for name in PRIVATE_CONTROL_DIRECTORIES:
+            self._prepare_private_control_directory(self._resolved_root / name)
+
+    @staticmethod
+    def _prepare_private_control_directory(path: Path) -> None:
+        """Create a daemon-owned control directory without following links."""
+
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ArtifactPathError("artifact control directory could not be created") from exc
+
+        flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | os.O_NOFOLLOW
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise ArtifactPathError("artifact control directory is unsafe") from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise ArtifactPathError("artifact control directory is unsafe")
+            if metadata.st_uid != os.geteuid():
+                raise ArtifactPathError("artifact control directory has an unexpected owner")
+            os.fchmod(descriptor, 0o700)
+        except ArtifactPathError:
+            raise
+        except OSError as exc:
+            raise ArtifactPathError("artifact control directory could not be secured") from exc
+        finally:
+            os.close(descriptor)
 
     @property
     def manifest_path(self) -> Path:
-        return self.root / "manifest.ndjson"
+        return self._resolved_root / "manifest.ndjson"
 
     def resolve(self, path: str, *, allow_empty: bool = False, public: bool = True) -> Path:
         relative = normalize_artifact_path(path, allow_empty=allow_empty, public=public)
         self._reject_symlink_components(relative)
-        candidate = (self.root / relative).resolve()
-        root = self.root.resolve()
+        candidate = (self._resolved_root / relative).resolve()
+        root = self._resolved_root
         try:
             common = os.path.commonpath([str(root), str(candidate)])
         except ValueError as exc:
@@ -95,7 +134,7 @@ class ArtifactStore:
     def _reject_symlink_components(self, relative: str) -> None:
         if not relative:
             return
-        current = self.root
+        current = self._resolved_root
         for part in Path(relative).parts:
             current = current / part
             if current.is_symlink():
@@ -163,7 +202,7 @@ class ArtifactStore:
         parts = tuple(Path(relative).parts) if relative else ()
         fd: int | None = None
         try:
-            fd = os.open(self.root, flags)
+            fd = os.open(self._resolved_root, flags)
             for part in parts:
                 try:
                     child = os.open(part, flags, dir_fd=fd)
@@ -189,8 +228,8 @@ class ArtifactStore:
                     os.close(fd)
 
     def _relative_to_root(self, path: Path) -> str:
-        root = Path(os.path.abspath(self.root))
-        candidate = Path(os.path.abspath(path))
+        root = self._resolved_root
+        candidate = path.resolve(strict=True)
         try:
             relative = candidate.relative_to(root)
         except ValueError as exc:
@@ -265,7 +304,7 @@ class ArtifactStore:
             )
             target_stat = os.fstat(target_handle)
             info = self._info(
-                self.root / public_path,
+                self._resolved_root / public_path,
                 public_path=public_path,
                 known_size_bytes=size_bytes,
                 known_sha256=sha256,
@@ -317,7 +356,7 @@ class ArtifactStore:
         target = self.resolve(relative)
         self._enforce_write_budget(target, len(data))
         parent = target.parent.resolve()
-        root = self.root.resolve()
+        root = self._resolved_root
         if os.path.commonpath([str(root), str(parent)]) != str(root):
             raise ArtifactPathError("artifact parent escapes root")
         parent.mkdir(parents=True, exist_ok=True)
@@ -369,7 +408,7 @@ class ArtifactStore:
         base = self.resolve(safe_prefix, allow_empty=True, public=False)
         if not base.exists():
             return []
-        root = self.root.resolve()
+        root = self._resolved_root
         paths = [base] if base.is_file() else [item for item in base.rglob("*") if item.exists()]
         infos: list[ArtifactInfo] = []
         for item in sorted(paths):
@@ -388,11 +427,11 @@ class ArtifactStore:
         return infos
 
     def total_public_bytes(self) -> int:
-        root = self.root.resolve()
+        root = self._resolved_root
         total = 0
-        if not self.root.exists():
+        if not root.exists():
             return total
-        for item in self.root.rglob("*"):
+        for item in root.rglob("*"):
             if item.is_symlink():
                 continue
             try:
@@ -414,10 +453,10 @@ class ArtifactStore:
     def _enforce_write_budget(self, target: Path, incoming_size: int) -> None:
         if self.max_total_bytes is None:
             return
-        root = self.root.resolve()
+        root = self._resolved_root
         existing_total = 0
-        if self.root.exists():
-            for item in self.root.rglob("*"):
+        if root.exists():
+            for item in root.rglob("*"):
                 try:
                     resolved = item.resolve()
                     if os.path.commonpath([str(root), str(resolved)]) != str(root):

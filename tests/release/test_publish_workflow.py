@@ -21,7 +21,20 @@ def test_release_workflow_builds_once_and_orders_publication() -> None:
     assert "--main-ref refs/remotes/origin/main" in source
     assert "group: publish-${{ github.ref }}" in source
     assert "cancel-in-progress: false" in source
-    assert "needs: build" in _job(source, "publish-testpypi", "verify-testpypi")
+    protected_smoke = _job(source, "protected-modal-smoke", "publish-testpypi")
+    assert "needs: build" in protected_smoke
+    assert "environment: modal-smoke" in protected_smoke
+    assert "MODAL_COMPUTER_USE_RUN_LIVE_TESTS" in protected_smoke
+    assert "tests/test_modal_integration.py" in protected_smoke
+    assert "uv run modal deploy" in protected_smoke
+    assert "test_modal_deployed_function_session_handoff_smoke" in protected_smoke
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west" in protected_smoke
+    assert "if: always()" in protected_smoke
+    assert "sandbox.terminate(wait=True)" in protected_smoke
+    assert "uv run modal app stop" in protected_smoke
+    assert "needs: [build, protected-modal-smoke]" in _job(
+        source, "publish-testpypi", "verify-testpypi"
+    )
     assert "needs: publish-testpypi" in _job(source, "verify-testpypi", "publish-pypi")
     assert "needs: verify-testpypi" in _job(source, "publish-pypi", "verify-pypi")
     assert "needs: publish-pypi" in _job(source, "verify-pypi", "github-release")

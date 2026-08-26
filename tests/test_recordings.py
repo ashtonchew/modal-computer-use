@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
 import time
 from dataclasses import replace
 
@@ -235,6 +236,7 @@ class _SlowLifecycleProcess:
     def __init__(self) -> None:
         self.stdin = _FakeStdin()
         self._return_code: int | None = None
+        self.wait_thread_ids: list[int] = []
 
     def poll(self) -> int | None:
         return self._return_code
@@ -244,6 +246,7 @@ class _SlowLifecycleProcess:
 
     def wait(self, timeout: float | None = None) -> int:
         del timeout
+        self.wait_thread_ids.append(threading.get_ident())
         time.sleep(0.08)
         self._return_code = 0
         return 0
@@ -273,6 +276,7 @@ def test_recording_lifecycle_routes_do_not_block_event_loop(
         popen_factory=lambda *args, **kwargs: process,
     )
     app.state.recordings = registry
+    event_loop_thread_id = threading.get_ident()
 
     async def exercise() -> None:
         async with app.router.lifespan_context(app):
@@ -283,27 +287,18 @@ def test_recording_lifecycle_routes_do_not_block_event_loop(
                 base_url="http://test",
                 headers={"Authorization": "Bearer dev"},
             ) as client:
-                timer_delay: list[float] = []
-
-                timer_started_at = time.perf_counter()
-
-                async def short_timer() -> None:
-                    await asyncio.sleep(0.01)
-                    timer_delay.append(time.perf_counter() - timer_started_at)
-
-                timer = asyncio.create_task(short_timer())
-                request_task = asyncio.create_task(
-                    client.request(
+                response = await client.request(
                     "POST" if operation == "stop" else "DELETE",
                     f"/v1/recordings/{started.id}/stop"
                     if operation == "stop"
                     else f"/v1/recordings/{started.id}",
-                    )
                 )
-                response = await request_task
-                await timer
                 assert response.status_code == 200
-                assert timer_delay[0] < 0.05
+                assert process.wait_thread_ids
+                assert all(
+                    thread_id != event_loop_thread_id
+                    for thread_id in process.wait_thread_ids
+                )
 
     asyncio.run(exercise())
 

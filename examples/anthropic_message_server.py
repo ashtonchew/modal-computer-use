@@ -3,8 +3,8 @@
 Install the provider extras with ``uv sync --extra modal --extra anthropic``
 and create the ``anthropic-api-key`` Modal Secret before you deploy this file.
 The async owner creates one desktop. It sends a versioned handle to a Function
-in the same exact region. That Function borrows the desktop once for the full
-model loop. Provider calls stay in this application-owned example.
+with the same verifiable narrow region selector. That Function borrows the
+desktop once for the full model loop. Provider calls stay in this application-owned example.
 
 The constants below are application choices, not SDK defaults. Review the
 region, environment, resources, image, browser, timeouts, and capacity before
@@ -50,7 +50,7 @@ DEFAULT_MAX_ELAPSED_SECONDS = 300.0
 DEFAULT_MAX_ACTION_TIMEOUT_MS = 30_000
 APP_NAME = "anthropic-computer-use"
 MODAL_ENVIRONMENT = "main"
-MODAL_REGION = "us-west-2"  # Replace with one measured exact Modal region selector.
+MODAL_REGION = "us-west"  # Replace with one measured narrow Modal region selector.
 ANTHROPIC_CREDENTIAL_REFERENCE = "anthropic-api-key"
 FUNCTION_CPU = 1.0
 FUNCTION_MEMORY_MIB = 2048
