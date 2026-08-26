@@ -7,7 +7,9 @@ package in application code. Adapters only translate provider action and screens
 
 The primary composition is async owner → versioned session handle → application-owned Modal
 Function → one trajectory borrow → pooled daemon client → owner cleanup. The Function and Sandbox
-use the same exact requested region. Missing or unverifiable placement fails before mutation.
+use the same requested narrow or granted granular region selector. Each runtime must expose a
+concrete provider-native region; a granular request must match it exactly. Missing or unverifiable
+placement fails before target credentials, lease acquisition, or mutation.
 
 The borrowed computer exposes one deep model-loop interface: `computer.step()`. The step module
 owns the action-to-immediate-frame contract, envelope encoding and decoding, and result validation.

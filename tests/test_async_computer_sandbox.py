@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -161,7 +162,10 @@ class _FakeSandbox:
         return {8080: SimpleNamespace(url="https://daemon.invalid")}
 
     async def _exec(self, *_args: str, **_kwargs: object) -> object:
-        return _FakeProcess(self.calls, self.daemon_bearer)
+        stdout = self.daemon_bearer
+        if any("MODAL_CLOUD_PROVIDER" in arg for arg in _args):
+            stdout = json.dumps({"cloud": "aws", "region": "us-west-2"})
+        return _FakeProcess(self.calls, stdout)
 
     async def _terminate(self, *, wait: bool = False) -> object:
         self.terminate_calls.append(wait)

@@ -198,14 +198,18 @@ through naming, documentation links, or successful benchmark results alone.
 The primary optimized composition is async owner → versioned handle → explicitly placed Modal
 Function → one `borrow_async()` context around the whole trajectory. The application owns the
 Function and provider model loop. The Function and Sandbox use one matching verifiable region
-selector. The Function reuses one pooled, authenticated async HTTP client. Each model-produced
-ordered action array uses one `computer.step()` request and receives one immediate post-action
-frame.
+selector, and each runtime must report a concrete provider-native region. A current narrow selector
+such as `us-west` can report unlike provider identifiers such as AWS `us-west-2` or GCP `us-west1`;
+Modal's scheduler remains authoritative for that cross-cloud mapping. A granted granular selector
+requires an exact runtime match. The Function reuses one pooled, authenticated async HTTP client.
+Each model-produced ordered action array uses one `computer.step()` request and receives one
+immediate post-action frame.
 
-Missing, broad, mismatching, or unverifiable placement fails before lease acquisition or desktop
-mutation. Protocol preflight also fails before lease acquisition when the daemon lacks the binary
-screenshot metadata, trajectory lease, operation receipt, or `computer-step-envelope-v1` contract.
-The runtime does not fall back to an external caller or to separate action and screenshot requests.
+Missing, broad, mismatching, or unverifiable placement fails before target credential creation,
+lease acquisition, or desktop mutation. Protocol preflight also fails before lease acquisition
+when the daemon lacks the binary screenshot metadata, trajectory lease, operation receipt, or
+`computer-step-envelope-v1` contract. The runtime does not fall back to an external caller or to
+separate action and screenshot requests.
 
 `AsyncComputerSandbox.create()` is the owner interface. `session_handle()` produces the handoff
 value. The canonical executable composition is in

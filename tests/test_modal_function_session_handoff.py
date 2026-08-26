@@ -49,6 +49,19 @@ def _modal_function_environment(monkeypatch) -> None:
     monkeypatch.setenv("MODAL_IS_REMOTE", "1")
     monkeypatch.setenv("MODAL_REGION", "us-west-2")
 
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "aws", "region": "us-west-2"},
+    )
+
+    async def runtime_placement_async(_sandbox: object) -> dict[str, str]:
+        return {"cloud": "aws", "region": "us-west-2"}
+
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement_async",
+        runtime_placement_async,
+    )
+
 
 def _session_id(
     *,
@@ -840,6 +853,102 @@ def test_borrow_live_config_mismatch_cleans_up_without_termination(monkeypatch) 
     assert target.detach_calls == 1
     assert client.close_calls == 0
     assert target.terminate_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("observed_region", "expected_error"),
+    [
+        (None, "SessionPlacementMissingError"),
+        ("https://private.invalid", "SessionPlacementMalformedError"),
+        ("us", "SessionPlacementUnverifiableError"),
+        ("us-east-1", "SessionPlacementMismatchError"),
+    ],
+)
+def test_borrow_rejects_invalid_observed_target_placement_before_credentials(
+    monkeypatch,
+    observed_region: str | None,
+    expected_error: str,
+) -> None:
+    _computer, target, client = _borrowed_computer()
+    _ModalSandboxType.from_id_result = target
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement",
+        lambda _sandbox: {"cloud": "aws", "region": observed_region},
+    )
+
+    with (
+        pytest.raises(SessionCompatibilityError) as raised,
+        _handle().borrow(run_id="run-123", function_region="us-west-2"),
+    ):
+        raise AssertionError("unreachable")
+
+    assert type(raised.value).__name__ == expected_error
+    assert target.credential_calls == 0
+    assert target.detach_calls == 1
+    assert client.close_calls == 0
+
+
+def test_borrow_accepts_concrete_target_region_for_public_narrow_selector(
+    monkeypatch,
+) -> None:
+    target = _OwnedSandbox(config_hash="a" * 16)
+    handle = _handle(requested_modal_region="us-west")
+    target._tags["computer-use.session_id"] = handle.session_id
+    _ModalSandboxType.from_id_result = target
+    monkeypatch.setitem(sys.modules, "modal", SimpleNamespace(Sandbox=_ModalSandboxType))
+    monkeypatch.setenv("MODAL_REGION", "us-west1")
+    transport = _CapabilityBorrowTransport(
+        [
+            "screenshot-binary-metadata-v1",
+            "trajectory-leases-v1",
+            "trajectory-operation-receipts-v1",
+            "computer-step-envelope-v1",
+        ]
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox.HTTPTransport",
+        lambda *_args, **_kwargs: transport,
+    )
+
+    with handle.borrow(run_id="run-123", function_region="us-west"):
+        pass
+
+    assert target.credential_calls == 1
+    assert target.detach_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_async_borrow_rejects_target_region_mismatch_before_credentials(
+    monkeypatch,
+) -> None:
+    target = _AsyncTarget()
+
+    async def from_id(_sandbox_id: str) -> _AsyncTarget:
+        target.calls.append("from_id.aio")
+        return target
+
+    async def mismatched_placement(_sandbox: object) -> dict[str, str]:
+        return {"cloud": "aws", "region": "us-east-1"}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "modal",
+        SimpleNamespace(Sandbox=SimpleNamespace(from_id=_AioCall(from_id))),
+    )
+    monkeypatch.setattr(
+        "modal_computer_use.sandbox._sandbox_runtime_placement_async",
+        mismatched_placement,
+    )
+
+    with pytest.raises(SessionPlacementMismatchError):
+        async with _handle().borrow_async(
+            run_id="async-run",
+            function_region="us-west-2",
+        ):
+            raise AssertionError("unreachable")
+
+    assert target.calls == ["from_id.aio", "get_tags.aio", "detach.aio"]
 
 
 def test_borrow_rejects_target_that_lost_sdk_ownership_marker(monkeypatch) -> None:

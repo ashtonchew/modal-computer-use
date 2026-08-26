@@ -17,7 +17,9 @@
   gate before release artifacts can reach TestPyPI or PyPI.
 - Updated the placed trajectory to accept Modal's current narrow selectors such as `us-west`,
   while retaining granted granular selectors. Broad selectors still fail before allocation, and
-  the declared Function, observed Function runtime, and Sandbox selector must match.
+  the Function and Sandbox must declare the same selector. Both runtimes must expose concrete
+  provider-native regions, including GCP forms such as `us-west1`; granted granular requests still
+  require exact matches. The target check runs before Connect credentials or a trajectory lease.
 - Made the managed Image privilege boundary compatible with Modal's `no_new_privs` runtime. The
   daemon retains lifecycle-controller authority, drops every GUI and screenshot child to the
   unprivileged desktop account, strips daemon credentials from child environments, and keeps

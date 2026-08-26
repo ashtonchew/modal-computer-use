@@ -4,10 +4,13 @@ Use these checks for the optimized default before you inspect low-level daemon b
 
 ## Handoff fails before the trajectory starts
 
-Check that the owner and Function use the same Modal environment and exact requested region. Check
-that the owner produced a current versioned handle and that the Function passed its region to
-`borrow_async()`. A missing, mismatched, or unverifiable placement must fail before desktop
-mutation. Do not work around the error with an external-caller fallback.
+Check that the owner and Function use the same Modal environment and requested narrow or granted
+granular region selector. The Function and Sandbox must each report a concrete provider-native
+region; AWS and GCP identifiers for one narrow selector need not resemble each other. Check that
+the owner produced a current versioned handle and that the Function passed its selector to
+`borrow_async()`. A missing, mismatched, or unverifiable placement must fail before target
+credential creation or desktop mutation. Do not work around the error with an external-caller
+fallback.
 
 ## Borrow fails or loses readiness
 

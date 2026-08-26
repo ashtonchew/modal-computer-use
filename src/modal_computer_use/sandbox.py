@@ -20,6 +20,9 @@ from ._regions import (
     is_modal_region_selector as _is_modal_region_selector,
 )
 from ._regions import (
+    is_modal_runtime_region_compatible as _is_modal_runtime_region_compatible,
+)
+from ._regions import (
     is_verifiable_modal_region_selector as _is_verifiable_modal_region_selector,
 )
 from ._version import __version__
@@ -1182,6 +1185,17 @@ class _AsyncModalFunctionSessionBorrow:
             return
 
 
+def _validate_observed_modal_region(
+    observed_region: str,
+    requested_region: str,
+) -> None:
+    if _is_modal_runtime_region_compatible(observed_region, requested_region):
+        return
+    if not _is_verifiable_modal_region_selector(observed_region):
+        raise SessionPlacementUnverifiableError
+    raise SessionPlacementMismatchError
+
+
 def _validate_borrow_request(
     handle: ComputerSessionHandle,
     *,
@@ -1225,10 +1239,7 @@ def _validate_borrow_request(
         raise SessionPlacementMissingError
     if not _is_modal_region_selector(observed_function_region):
         raise SessionPlacementMalformedError
-    if not _is_verifiable_modal_region_selector(observed_function_region):
-        raise SessionPlacementUnverifiableError
-    if observed_function_region != requested_region:
-        raise SessionPlacementMismatchError
+    _validate_observed_modal_region(observed_function_region, requested_region)
     if handle.vnc_mode not in {"off", "view_only"}:
         raise SessionCompatibilityError
 
@@ -4666,6 +4677,7 @@ def _borrow_modal_function_session(
             raise SessionPlacementUnverifiableError
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
+        _validate_live_borrow_target_placement_sync(handle, sandbox)
         token_info = sandbox.create_connect_token(
             user_metadata={"sdk": "modal-computer-use", "version": __version__},
             port=8080,
@@ -4740,6 +4752,7 @@ async def _borrow_modal_function_session_async(
             raise SessionPlacementUnverifiableError
         if not _live_borrow_target_matches(handle, sandbox=sandbox, tags=tags):
             raise SessionTargetMismatchError()
+        await _validate_live_borrow_target_placement_async(handle, sandbox)
         token_info = await sandbox.create_connect_token.aio(
             user_metadata={"sdk": "modal-computer-use", "version": __version__},
             port=8080,
@@ -4827,6 +4840,36 @@ def _live_borrow_target_matches(
             )
         )
     )
+
+
+def _validate_live_borrow_target_placement_sync(
+    handle: ComputerSessionHandle,
+    sandbox: object,
+) -> None:
+    try:
+        observed_region = _sandbox_runtime_placement(sandbox)["region"]
+    except Exception:
+        raise SessionPlacementUnverifiableError from None
+    if observed_region is None or not observed_region.strip():
+        raise SessionPlacementMissingError
+    if not _is_modal_region_selector(observed_region):
+        raise SessionPlacementMalformedError
+    _validate_observed_modal_region(observed_region, handle.requested_modal_region)
+
+
+async def _validate_live_borrow_target_placement_async(
+    handle: ComputerSessionHandle,
+    sandbox: object,
+) -> None:
+    try:
+        observed_region = (await _sandbox_runtime_placement_async(sandbox))["region"]
+    except Exception:
+        raise SessionPlacementUnverifiableError from None
+    if observed_region is None or not observed_region.strip():
+        raise SessionPlacementMissingError
+    if not _is_modal_region_selector(observed_region):
+        raise SessionPlacementMalformedError
+    _validate_observed_modal_region(observed_region, handle.requested_modal_region)
 
 
 def _borrow_ingress_parts_sync(
