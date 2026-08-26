@@ -365,7 +365,7 @@ def test_credential_boundary_recipe_limits_shared_paths() -> None:
     assert "computer-use" in commands
     assert "/home/desktop/artifacts" in commands
     assert "/home/desktop/recordings" in commands
-    assert "/home/desktop/artifacts/traces" in commands
+    assert "/home/desktop/artifacts/traces" not in commands
     assert "/var/lib/computer-daemon/runtime" in commands
     assert "/var/lib/computer-daemon/vnc" in commands
     assert "3770" in commands

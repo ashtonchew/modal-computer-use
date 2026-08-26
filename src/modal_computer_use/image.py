@@ -1028,10 +1028,6 @@ def _credential_boundary_commands() -> tuple[str, ...]:
         ),
         (
             "install -d -m 0700 -o root -g root "
-            "/home/desktop/artifacts/traces"
-        ),
-        (
-            "install -d -m 0700 -o root -g root "
             "/var/lib/computer-daemon/runtime"
         ),
         (
