@@ -3,6 +3,12 @@
   <h1>modal-computer-use</h1>
 </div>
 
+[![PyPI](https://img.shields.io/pypi/v/modal-computer-use)](https://pypi.org/project/modal-computer-use/)
+[![Latest release](https://img.shields.io/github/v/release/ashtonchew/modal-computer-use)](https://github.com/ashtonchew/modal-computer-use/releases/latest)
+[![Release validation](https://github.com/ashtonchew/modal-computer-use/actions/workflows/release-validation.yml/badge.svg?branch=main)](https://github.com/ashtonchew/modal-computer-use/actions/workflows/release-validation.yml)
+[![Python](https://img.shields.io/pypi/pyversions/modal-computer-use)](https://pypi.org/project/modal-computer-use/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 `modal-computer-use` turns a Modal Sandbox into a remotely controllable Linux desktop through a
 typed, provider-neutral Python SDK and an in-Sandbox daemon.
 

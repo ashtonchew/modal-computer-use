@@ -90,13 +90,13 @@ def reconcile_modal_billing(
     base = {
         "source": source,
         "source_url": source_url,
-        "environment_name": environment_name,
+        "scope": "environment" if environment_name is not None else "workspace",
         "currency": "USD",
         "start": _utc_iso(start) if start is not None else None,
         "end": _utc_iso(end),
         "resolution": resolution,
-        "tag_names": tag_names,
-        "required_tags": required_tags,
+        "query_tag_count": len(tag_names),
+        "required_tag_count": len(required_tags),
         "matched_row_count": 0,
         "total": None,
         "notes": [
@@ -316,9 +316,5 @@ def _int_or_default(value: Any, default: int) -> int:
     return default
 
 
-def _safe_error_message(exc: Exception) -> str:
-    message = str(exc)
-    for marker in ("Bearer ", "token=", "password=", "secret="):
-        if marker in message:
-            return "modal billing reconciliation failed"
-    return message[:240]
+def _safe_error_message(_: Exception) -> str:
+    return "modal billing reconciliation failed; inspect private operator logs"

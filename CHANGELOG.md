@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 2.0.1 - 2026-08-26
+
+- Prevented Modal billing reconciliation selectors from appearing in benchmark JSON. Billing tag
+  values and environment names now remain private inputs; reports expose only the billing scope
+  and selector names needed to interpret the result.
+- Enforced daemon identity, lifecycle-authority, readiness, receipt, and provider-transport safety
+  contracts, including bounded validation for user-supplied window regular expressions.
+- Made release Images use Modal-managed runtime Python and upgraded the native X11 extension to
+  PyO3 0.29.
+- Added provenance-bound action-to-frame provider comparisons and more precise X11 shared-memory
+  capture-tail attribution without changing the production screenshot default.
+- Added Python 3.13 to continuous integration and made the protected live Modal smoke a required
+  gate before release artifacts can reach TestPyPI or PyPI.
+
 ## 2.0.0 - 2026-08-10
 
 - Replaced the daemon's abrupt 20-action rolling window with a daemon-local token bucket. The

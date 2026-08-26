@@ -1,17 +1,20 @@
-# Version 2 release candidate
+# Version 2 release record
 
-Status: live-verified branch candidate; not published.
+Status: version 2 is published. The immutable current release is linked from the
+[GitHub latest-release page](https://github.com/ashtonchew/modal-computer-use/releases/latest) and
+[PyPI](https://pypi.org/project/modal-computer-use/).
 
 Audience: release maintainers. User setup and migration guidance lives in
 [Version 2 migration](migration-v2.md).
 
 This record binds the package, daemon, protocol, documentation, benchmark, and rollback contracts
-for version 2.0.0. It does not authorize a live Modal run, artifact publication, package
-publication, or hosted-documentation publication.
+for the version 2 release line. Publication remains an explicit maintainer operation through the
+protected release workflow.
 
 ## Release identity
 
-The candidate identity is `2.0.0`. The following files must agree before a release tag is created:
+The current source identity is `2.0.1`. The following files must agree before a release tag is
+created:
 
 - `pyproject.toml`
 - `src/modal_computer_use/_version.py`
@@ -19,7 +22,8 @@ The candidate identity is `2.0.0`. The following files must agree before a relea
 - the daemon `/v1/version` response
 - `CHANGELOG.md`
 
-The release tag is `v2.0.0`. Create it only on the exact verified `origin/main` commit and only
+The release tag is derived from the project version (`v2.0.1` for this source). Create it only on
+the exact verified `origin/main` commit and only
 after the worktree is clean. The existing release-candidate checker enforces those conditions.
 
 The daemon keeps API version `v1`. Version 1.1 clients can continue to use the tested REST and JSON
@@ -82,10 +86,10 @@ one. Adding a named Image later is a separate provenance, correctness, cost, and
 
 ## Selected rollback procedure
 
-The operator-selected rollback target for the public SDK is `modal-computer-use==1.1.0`. The
-documentation rollback target is the annotated tag `docs-v1.1.0-last-known-good` described in the
-hosted-documentation release record. No named runtime Image is part of this candidate's required
-release set.
+The operator-selected patch rollback target for the public SDK is `modal-computer-use==2.0.0`.
+The major-version documentation rollback target remains the annotated tag
+`docs-v1.1.0-last-known-good` described in the hosted-documentation release record. No named
+runtime Image is part of this release's required set.
 
 Use an explicit rollback:
 
@@ -94,7 +98,7 @@ Use an explicit rollback:
    revisions.
 3. Restore the documentation in a reviewed commit. Keep both major versions selectable and make
    version 1 the recommended version while version 2 is unavailable.
-4. Tell operators to pin `modal-computer-use==1.1.0`. If an operator separately selected a named
+4. Tell operators to pin `modal-computer-use==2.0.0`. If an operator separately selected a named
    runtime artifact, restore its recorded compatible revision. Do not mutate or replace published
    version 2 files.
 5. Verify the pinned package, retained runtime artifact, production documentation, and cleanup path.
@@ -104,10 +108,11 @@ The version 2 optimized runtime never silently downgrades to version 1 or to an 
 caller. It continues to fail closed when its required placement, handoff, or protocol prerequisites
 are absent.
 
-## Candidate gates
+## Release gates
 
-The candidate may be tagged only when all offline checks pass from a clean checkout of the exact
-main revision. Live or billable gates require separate authorization.
+The source may be tagged only when all offline checks pass from a clean checkout of the exact main
+revision. The protected release workflow runs the bounded live Modal smoke before either package
+index receives release artifacts.
 
 - Run the full lint, type, test, OpenAPI, documentation, example, and import-boundary checks.
 - Build one wheel and one source distribution, then install and probe both outside the checkout.
@@ -120,8 +125,8 @@ main revision. Live or billable gates require separate authorization.
   test may skip. Together they prove real Xvfb and xclip selection ownership, replacement, and
   cleanup. The protected smoke passed on 2026-08-08.
 - Verify that the release bundle contains the exact approved bytes and checksums.
-- Run the protected placed-trajectory smoke only with explicit authorization. It passed on
-  2026-08-08 with exact `us-west-2` placement.
+- Run the protected placed-trajectory smoke before publication. It passed on 2026-08-08 with exact
+  `us-west-2` placement; every patch release must produce fresh same-commit evidence.
 - Run `scripts/run_optimized_default_promotion.py` from the exact runtime commit with explicit
   authorization. It passed on 2026-08-08 for runtime commit `31bcafefbba2ba75653075a04b12ce2eb816c838`.
   The retained evidence commit changes documentation and benchmark files only.
@@ -135,5 +140,5 @@ main revision. Live or billable gates require separate authorization.
 - Confirm that the hosted documentation preview and rollback version selector pass before its
   publication.
 
-Do not call the candidate released until the production package, immutable GitHub Release, and
-hosted documentation have each passed their post-publication checks.
+Do not call a version released until the production package, immutable GitHub Release, and hosted
+documentation have each passed their post-publication checks.

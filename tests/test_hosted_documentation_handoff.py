@@ -98,7 +98,7 @@ def test_handoff_manifest_requires_safe_docs_release_controls() -> None:
     assert repository["branch_protection"]["required"] is True
     assert repository["branch_protection"]["required_check"] == "Docs"
     assert repository["branch_protection"]["pull_request_required"] is True
-    assert release["required_package_version"] == "2.0.0"
+    assert release["required_package_version"] == "2.0.1"
     assert release["last_known_good"]["tag"] == "docs-v1.1.0-last-known-good"
     assert release["last_known_good"]["revision"] == (
         "5d0f4e2f82ef0906d4cb4a6cc4eeafe018dceb2e"
@@ -107,7 +107,7 @@ def test_handoff_manifest_requires_safe_docs_release_controls() -> None:
     assert release["version_navigation"]["previous"] == "1.x"
     assert release["publication_order"] == [
         "runtime artifacts",
-        "Python package 2.0.0",
+        "Python package 2.0.1",
         "hosted documentation",
     ]
 
@@ -115,13 +115,13 @@ def test_handoff_manifest_requires_safe_docs_release_controls() -> None:
 def test_package_version_check_accepts_only_the_manifest_version(tmp_path: Path) -> None:
     manifest = _manifest()
     matching = tmp_path / "matching.toml"
-    matching.write_text('[project]\nversion = "2.0.0"\n', encoding="utf-8")
+    matching.write_text('[project]\nversion = "2.0.1"\n', encoding="utf-8")
     mismatch = tmp_path / "mismatch.toml"
     mismatch.write_text('[project]\nversion = "1.1.0"\n', encoding="utf-8")
 
     assert validate_package_version(manifest, matching) == []
     assert validate_package_version(manifest, mismatch) == [
-        "package version is 1.1.0; hosted docs require 2.0.0"
+        "package version is 1.1.0; hosted docs require 2.0.1"
     ]
 
 

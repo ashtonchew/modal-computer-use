@@ -99,9 +99,14 @@ def validate_manifest(manifest: object) -> list[str]:
     else:
         if release.get("publication_authorization_required") is not True:
             errors.append("publication must require explicit operator authorization")
+        required_package_version = release.get("required_package_version")
+        if not isinstance(required_package_version, str) or not STABLE_SEMVER.fullmatch(
+            required_package_version
+        ):
+            errors.append("required package version must be stable semver")
         if release.get("publication_order") != [
             "runtime artifacts",
-            "Python package 2.0.0",
+            f"Python package {required_package_version}",
             "hosted documentation",
         ]:
             errors.append(

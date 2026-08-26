@@ -33,7 +33,7 @@ def test_health_version_capabilities(test_client) -> None:
     assert test_client.get("/readyz").json()["ready"] is True
     version = test_client.get("/v1/version").json()
     assert version["api_version"] == "v1"
-    assert version["daemon_version"] == "2.0.0"
+    assert version["daemon_version"] == "2.0.1"
     assert version["sdk_min_version"] == "1.1.0"
     assert version["sdk_max_version"] == "2.x"
     caps = test_client.get("/v1/capabilities").json()

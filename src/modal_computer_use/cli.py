@@ -1182,6 +1182,7 @@ def _benchmark_report(args: argparse.Namespace) -> int:
 
 def _benchmark_sdk(args: argparse.Namespace) -> int:
     surfaces = _sdk_surfaces(args)
+    billing_reconciliation_request = _benchmark_billing_reconciliation_request(args)
     sandbox_exec_runner = None
     sandbox_exec_setup_failure = None
     if "sandbox-exec" in surfaces:
@@ -1197,6 +1198,7 @@ def _benchmark_sdk(args: argparse.Namespace) -> int:
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=_benchmark_environment_metadata(args),
+            billing_reconciliation_request=billing_reconciliation_request,
         )
     elif args.base_url:
         client = DaemonClient(args.base_url, token=args.token)
@@ -1210,6 +1212,7 @@ def _benchmark_sdk(args: argparse.Namespace) -> int:
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=_benchmark_environment_metadata(args),
+                billing_reconciliation_request=billing_reconciliation_request,
             )
         finally:
             client.close()
@@ -1262,6 +1265,7 @@ def _benchmark_sdk_created_modal_sandbox(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
+            billing_reconciliation_request=_benchmark_billing_reconciliation_request(args),
         )
     except Exception as exc:
         cleanup_errors = _cleanup_modal_benchmark_computer(computer)
@@ -1277,6 +1281,7 @@ def _benchmark_sdk_created_modal_sandbox(
 def _benchmark_compare(args: argparse.Namespace) -> int:
     providers = _compare_providers(args)
     benchmark_case = getattr(args, "case", "all")
+    billing_reconciliation_request = _benchmark_billing_reconciliation_request(args)
     if not args.mock_local and _has_live_external_provider(providers):
         _load_benchmark_env_file(args.env_file)
     sandbox_exec_runner = None
@@ -1298,6 +1303,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=_benchmark_environment_metadata(args),
+                billing_reconciliation_request=billing_reconciliation_request,
                 benchmark_case=benchmark_case,
             )
         )
@@ -1313,6 +1319,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
                 sandbox_exec_runner=sandbox_exec_runner,
                 sandbox_exec_setup_failure=sandbox_exec_setup_failure,
                 environment_metadata=_benchmark_environment_metadata(args),
+                billing_reconciliation_request=billing_reconciliation_request,
                 benchmark_case=benchmark_case,
             )
         finally:
@@ -1328,6 +1335,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=_benchmark_environment_metadata(args),
+            billing_reconciliation_request=billing_reconciliation_request,
             benchmark_case=benchmark_case,
         )
     elif args.create_modal_sandbox:
@@ -1345,6 +1353,7 @@ def _benchmark_compare(args: argparse.Namespace) -> int:
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=_benchmark_environment_metadata(args),
+            billing_reconciliation_request=billing_reconciliation_request,
             benchmark_case=benchmark_case,
         )
     output = _json_string(result)
@@ -1431,6 +1440,7 @@ def _benchmark_compare_created_modal_sandbox(
             sandbox_exec_runner=sandbox_exec_runner,
             sandbox_exec_setup_failure=sandbox_exec_setup_failure,
             environment_metadata=metadata,
+            billing_reconciliation_request=_benchmark_billing_reconciliation_request(args),
             precomputed_provider_results=precomputed_results,
             benchmark_case=benchmark_case,
             modal_action_pacing_seconds=(
@@ -2291,17 +2301,24 @@ def _benchmark_environment_metadata(args: argparse.Namespace) -> dict[str, Any]:
             gpu=getattr(args, "gpu", None),
         ),
     }
-    if getattr(args, "modal_billing_reconcile", False):
-        metadata["modal_billing_reconciliation"] = modal_billing_reconciliation_request(
-            start=_parse_cli_datetime(args.modal_billing_start),
-            end=_parse_cli_datetime(args.modal_billing_end) if args.modal_billing_end else None,
-            resolution=args.modal_billing_resolution,
-            buffer_seconds=args.modal_billing_buffer_seconds,
-            required_tags=_parse_key_value_pairs(args.modal_billing_tag),
-            tag_names=args.modal_billing_tag_name or None,
-            environment_name=args.modal_billing_environment,
-        )
     return metadata
+
+
+def _benchmark_billing_reconciliation_request(
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    if not getattr(args, "modal_billing_reconcile", False):
+        return None
+    billing_end = getattr(args, "modal_billing_end", None)
+    return modal_billing_reconciliation_request(
+        start=_parse_cli_datetime(args.modal_billing_start),
+        end=_parse_cli_datetime(billing_end) if billing_end else None,
+        resolution=args.modal_billing_resolution,
+        buffer_seconds=args.modal_billing_buffer_seconds,
+        required_tags=_parse_key_value_pairs(args.modal_billing_tag),
+        tag_names=args.modal_billing_tag_name or None,
+        environment_name=getattr(args, "modal_billing_environment", None),
+    )
 
 
 def _record_modal_resource_lifetime(

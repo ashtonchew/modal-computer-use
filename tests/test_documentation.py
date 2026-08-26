@@ -256,17 +256,18 @@ def test_public_documentation_links_use_expected_routes() -> None:
         assert hosted_links == expected, path.relative_to(ROOT)
 
 
-def test_release_docs_identify_v2_release_candidate() -> None:
+def test_release_docs_identify_current_v2_release() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = CHANGELOG.read_text(encoding="utf-8")
     specification = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
     assert "git@v1.1.0" not in readme
     assert "## Unreleased" in changelog
+    assert "## 2.0.1 - 2026-08-26" in changelog
     assert "## 2.0.0 - 2026-08-10" in changelog
-    assert "active specification for the `2.0.0` release candidate" in specification
-    assert "**Previous released baseline:** `v1.1.0`" in specification
-    assert "**Release identity:** `v2.0.0`" in specification
+    assert "active specification for the published version 2 release line" in specification
+    assert "**Previous released baseline:** `v2.0.0`" in specification
+    assert "**Release identity:** `v2.0.1`" in specification
 
 
 def test_hosted_documentation_release_record_names_control_points() -> None:
@@ -288,7 +289,7 @@ def test_hosted_documentation_release_record_names_control_points() -> None:
     assert "npm run check" in source
     assert "navigation.versions" in source
     assert "docs-v1.1.0-last-known-good" in source
-    assert "5d0f4e2f82ef0906d4cb4a6cc4eeafe018dceb2e" in source
+    assert "73461e8ef563e4ab372c6f051f8f142d7c5e84f2" in source
     assert "Do not force-push" in source
 
 
@@ -658,8 +659,9 @@ def test_run_gateway_contract_has_one_focused_guide() -> None:
 def test_active_product_spec_uses_one_revision_marker() -> None:
     source = (DOCS / "spec" / "product-spec.md").read_text(encoding="utf-8")
 
-    assert "**Revision:** v9" in source
-    assert source.rstrip().endswith("(End of v9.)")
+    assert "**Revision:** v10" in source
+    assert source.rstrip().endswith("(End of v10.)")
+    assert "(End of v9.)" not in source
     assert "(End of v8.)" not in source
 
 
