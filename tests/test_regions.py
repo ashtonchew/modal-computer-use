@@ -34,6 +34,7 @@ def test_modal_region_shape_rejects_malformed_values() -> None:
 def test_public_narrow_selector_accepts_provider_native_runtime_regions() -> None:
     assert is_modal_runtime_region_compatible("us-west-2", "us-west") is True
     assert is_modal_runtime_region_compatible("us-west1", "us-west") is True
+    assert is_modal_runtime_region_compatible("westus3", "us-west") is True
     assert is_modal_runtime_region_compatible("ap-southeast-1", "ap-southeast") is True
     assert is_modal_runtime_region_compatible("asia-northeast3", "ap-northeast") is True
 
@@ -52,3 +53,8 @@ def test_granted_granular_selector_requires_exact_runtime_region() -> None:
 def test_granted_gcp_granular_selector_is_verifiable() -> None:
     assert is_verifiable_modal_region_selector("us-west1") is True
     assert is_modal_runtime_region_compatible("us-west1", "us-west1") is True
+
+
+def test_granted_azure_granular_selector_is_verifiable() -> None:
+    assert is_verifiable_modal_region_selector("westus3") is True
+    assert is_modal_runtime_region_compatible("westus3", "westus3") is True

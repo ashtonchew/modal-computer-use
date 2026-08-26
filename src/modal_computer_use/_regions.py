@@ -40,12 +40,13 @@ def is_verifiable_modal_region_selector(value: str) -> bool:
 def _is_concrete_modal_runtime_region(value: str) -> bool:
     """Recognize provider-native region identifiers reported by Modal runtimes."""
 
-    return (
-        re.fullmatch(
-            r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*-[a-z0-9]*[0-9][a-z0-9]*",
-            value,
-        )
-        is not None
+    # AWS and GCP identifiers include hyphenated numeric components (for example,
+    # ``us-west-2`` and ``us-west1``), while Azure uses compact identifiers such
+    # as ``westus3``. Modal may report any of those provider-native forms for a
+    # public cross-cloud selector. Requiring a digit distinguishes concrete
+    # identifiers from public selectors such as ``us-west``.
+    return is_modal_region_selector(value) and any(
+        character.isdigit() for character in value
     )
 
 
