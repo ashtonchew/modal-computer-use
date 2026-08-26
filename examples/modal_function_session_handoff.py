@@ -37,7 +37,7 @@ from run_gateway.domain import TrajectoryOutcome, TrajectoryStatus  # noqa: E402
 
 APP_NAME = "computer-use-function-handoff"
 MODAL_ENVIRONMENT = "main"
-FUNCTION_REGION = "us-west-2"  # Replace with one measured exact Modal region selector.
+FUNCTION_REGION = "us-west"  # Replace with one measured narrow Modal region selector.
 FUNCTION_CPU = 1.0
 FUNCTION_MEMORY_MIB = 2048
 FUNCTION_PYTHON_VERSION = "3.12"

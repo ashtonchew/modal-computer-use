@@ -135,8 +135,8 @@ that application policy.
 Use the native-async borrow context inside an async user-owned Modal Function:
 
 ```python
-# Replace this with one exact region measured for your workload.
-FUNCTION_REGION = "us-west-2"
+# Replace this with one supported narrow region selector measured for your workload.
+FUNCTION_REGION = "us-west"
 
 
 async def trajectory(handle: ComputerSessionHandle, task: str, run_id: str) -> None:
@@ -358,7 +358,7 @@ Native async creation, attachment, and named acquisition are lazy, one-shot cont
 
 ```python
 placed = ComputerConfig(
-    runtime={"modal_environment": "main", "modal_region": "us-west-2"},
+    runtime={"modal_environment": "main", "modal_region": "us-west"},
 )
 async with AsyncComputerSandbox.create(config=placed) as computer:
     await computer.mouse.click(320, 240)

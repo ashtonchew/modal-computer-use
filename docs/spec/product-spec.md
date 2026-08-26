@@ -59,7 +59,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 | Transport | `attested-tunnel` is the default Modal ingress. An SDK-managed bootstrap bearer authorizes a short-lived daemon-issued bearer for the encrypted tunnel. HTTP/2 is opt-in. |
 | Sessions | Sync and native-async daemon clients, persistent hot sessions, and observation WebSocket transports are implemented. |
 | Observations | The transport and action primitives are supported. First-visual-change composition remains Alpha and explicitly experimental. |
-| Handoff | An async owner passes a versioned `ComputerSessionHandle` to an application-owned Modal Function in the same exact requested region. The Function resolves fresh access and borrows one exclusive trajectory lease around the whole model loop. |
+| Handoff | An async owner passes a versioned `ComputerSessionHandle` to an application-owned Modal Function with the same verifiable narrow or granted granular region selector. The Function resolves fresh access and borrows one exclusive trajectory lease around the whole model loop. |
 | Delivery ambiguity | Borrowed mutations use gap-free operation sequences and target-local durable receipts. The SDK resolves response loss without replaying a possibly applied mutation. |
 | Recovery | A completed result may be followed by explicit read-only reobservation. Indeterminate target state is quarantined until owner acknowledgment. |
 | Capacity | `ComputerSandboxManager` implements attach/reuse, cleanup, and owned warm-pool fill/claim/reconcile behavior. |
@@ -197,9 +197,10 @@ through naming, documentation links, or successful benchmark results alone.
 
 The primary optimized composition is async owner → versioned handle → explicitly placed Modal
 Function → one `borrow_async()` context around the whole trajectory. The application owns the
-Function and provider model loop. The Function and Sandbox use one exact requested region. The
-Function reuses one pooled, authenticated async HTTP client. Each model-produced ordered action
-array uses one `computer.step()` request and receives one immediate post-action frame.
+Function and provider model loop. The Function and Sandbox use one matching verifiable region
+selector. The Function reuses one pooled, authenticated async HTTP client. Each model-produced
+ordered action array uses one `computer.step()` request and receives one immediate post-action
+frame.
 
 Missing, broad, mismatching, or unverifiable placement fails before lease acquisition or desktop
 mutation. Protocol preflight also fails before lease acquisition when the daemon lacks the binary
@@ -255,17 +256,18 @@ configuration before adopting, generating, or validating a run ID.
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig
 
 config = ComputerConfig(
-    runtime={"modal_environment": "main", "modal_region": "us-west-2"},
+    runtime={"modal_environment": "main", "modal_region": "us-west"},
 )
 async with AsyncComputerSandbox.create(config=config) as computer:
     await computer.mouse.click(320, 240)
 ```
 
 `create()` is the primary placed-owner interface. Entry validates a non-empty Modal environment
-and one exact Modal region before any Modal lookup or Sandbox allocation. It also rejects tunnel
-ingress, control VNC, and warm-pool tagging because those modes cannot produce its handoff. The explicitly named
-`create_unplaced()` compatibility method retains low-level async ownership without promising an
-eligible handoff. `create()`, `create_unplaced()`, `attach()`, and `attach_or_create(name=...)`
+and one supported narrow or granted granular Modal region selector before any Modal lookup or
+Sandbox allocation. It also rejects tunnel ingress, control VNC, and warm-pool tagging because
+those modes cannot produce its handoff. The explicitly named `create_unplaced()` compatibility
+method retains low-level async ownership without promising an eligible handoff. `create()`,
+`create_unplaced()`, `attach()`, and `attach_or_create(name=...)`
 return lazy, one-shot async context managers. They perform no Modal work until entry and yield only
 after the Sandbox and daemon are ready. Async attach accepts exactly one of sandbox ID, name, or run ID. Direct URLs use
 `AsyncDaemonClient`; async orchestration does not include `wait=False`.
@@ -578,8 +580,8 @@ canonical for async code and `borrow()` is available for synchronous code. One b
 the complete repeated trajectory; it never provisions the target and is not entered once per
 action. Borrow entry:
 
-1. verifies the deployed-Function environment and exact requested region declaration;
-2. verifies the observed Function region and the target's requested exact region;
+1. verifies the deployed-Function environment and requested region-selector declaration;
+2. verifies the observed Function region and the target's requested selector;
 3. resolves the live Sandbox through the Function's Modal identity;
 4. validates the live config/session policy tags;
 5. mints fresh access;

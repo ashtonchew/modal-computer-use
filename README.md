@@ -24,8 +24,8 @@ uv add "modal-computer-use[modal]"
 
 The Modal extra supports the Modal 1.5 line and requires Modal 1.5.3 or later.
 
-Save this as `quickstart.py`. Choose one exact Modal region for both the Function and the Sandbox.
-The resource values are application choices, not SDK defaults.
+Save this as `quickstart.py`. Choose one supported narrow Modal region selector for both the
+Function and the Sandbox. The resource values are application choices, not SDK defaults.
 
 ```python
 import uuid
@@ -35,7 +35,7 @@ import modal
 from modal_computer_use import AsyncComputerSandbox, ComputerConfig, ComputerSessionHandle
 
 APP_NAME = "computer-use-quickstart"
-REGION = "us-west-2"
+REGION = "us-west"
 
 app = modal.App(APP_NAME)
 function_image = modal.Image.debian_slim(python_version="3.12").pip_install(

@@ -191,8 +191,8 @@ def test_settings_require_minimum_capacity_and_native_backend() -> None:
         _settings(cpu=2.0).validate(batch_cost=10)
     with pytest.raises(ValueError, match="exceeds the configured burst"):
         _settings(input_rate_limit_burst=1).validate(batch_cost=10)
-    with pytest.raises(ValueError, match="exact provider region"):
-        _settings(requested_region="us-west").validate(batch_cost=10)
+    with pytest.raises(ValueError, match="verifiable narrow"):
+        _settings(requested_region="us").validate(batch_cost=10)
 
 
 @pytest.mark.asyncio

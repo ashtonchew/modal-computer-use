@@ -5,7 +5,6 @@ import hashlib
 import json
 import math
 import os
-import re
 import secrets as _secrets
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -17,6 +16,12 @@ from types import MappingProxyType
 from typing import Any, Literal, cast
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
+from ._regions import (
+    is_modal_region_selector as _is_modal_region_selector,
+)
+from ._regions import (
+    is_verifiable_modal_region_selector as _is_verifiable_modal_region_selector,
+)
 from ._version import __version__
 from .borrowed import AsyncBorrowedComputer, BorrowedComputer
 from .client import AsyncDaemonClient, DaemonClient
@@ -1206,12 +1211,12 @@ def _validate_borrow_request(
         raise SessionPlacementMissingError
     if not _is_modal_region_selector(function_region):
         raise SessionPlacementMalformedError
-    if not _is_exact_modal_region_selector(function_region):
+    if not _is_verifiable_modal_region_selector(function_region):
         raise SessionPlacementUnverifiableError
     requested_region = handle.requested_modal_region
     if not _is_modal_region_selector(requested_region):
         raise SessionPlacementMalformedError
-    if not _is_exact_modal_region_selector(requested_region):
+    if not _is_verifiable_modal_region_selector(requested_region):
         raise SessionPlacementUnverifiableError
     if function_region != handle.requested_modal_region:
         raise SessionPlacementMismatchError
@@ -1220,20 +1225,12 @@ def _validate_borrow_request(
         raise SessionPlacementMissingError
     if not _is_modal_region_selector(observed_function_region):
         raise SessionPlacementMalformedError
-    if not _is_exact_modal_region_selector(observed_function_region):
+    if not _is_verifiable_modal_region_selector(observed_function_region):
         raise SessionPlacementUnverifiableError
     if observed_function_region != requested_region:
         raise SessionPlacementMismatchError
     if handle.vnc_mode not in {"off", "view_only"}:
         raise SessionCompatibilityError
-
-
-def _is_modal_region_selector(value: str) -> bool:
-    return re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+", value) is not None
-
-
-def _is_exact_modal_region_selector(value: str) -> bool:
-    return re.fullmatch(r"[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*", value) is not None
 
 
 def _validate_placed_owner_configuration(inputs: _SandboxCreateInputs) -> None:
@@ -1248,7 +1245,7 @@ def _validate_placed_owner_configuration(inputs: _SandboxCreateInputs) -> None:
         raise SessionPlacementMissingError
     if not _is_modal_region_selector(region):
         raise SessionPlacementMalformedError
-    if not _is_exact_modal_region_selector(region):
+    if not _is_verifiable_modal_region_selector(region):
         raise SessionPlacementUnverifiableError
     if config.ingress not in {"attested-tunnel", "connect"}:
         raise SessionCompatibilityError
@@ -2522,7 +2519,8 @@ class AsyncComputerSandbox:
     """Native-async owner or attachment for one Modal computer Sandbox.
 
     The primary :meth:`create` path requires an explicit Modal environment and
-    exact region so the owner can produce a placed session handoff. Use
+    verifiable narrow or granted granular region selector so the owner can produce a placed
+    session handoff. Use
     :meth:`create_unplaced` only for intentional low-level compatibility work.
     Each constructor returns a lazy async context manager and performs no Modal
     work until entry.

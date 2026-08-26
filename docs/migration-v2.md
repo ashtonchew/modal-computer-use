@@ -6,9 +6,9 @@ lifecycle contract. It does not remove the daemon's JSON/base64 or REST compatib
 Use `AsyncComputerSandbox.create()` in an async context for the primary owner. Call
 `owner.session_handle()`, pass the handle to the placed Function, and enter
 `handle.borrow_async()` once around that Function's complete trajectory.
-The primary `create()` validates an explicit Modal environment and exact region before any Modal
-lookup or desktop allocation. Use `AsyncComputerSandbox.create_unplaced()` only for intentional
-low-level compatibility work that does not need a session handoff.
+The primary `create()` validates an explicit Modal environment and verifiable region selector
+before any Modal lookup or desktop allocation. Use `AsyncComputerSandbox.create_unplaced()` only
+for intentional low-level compatibility work that does not need a session handoff.
 
 ## Migration table
 
@@ -16,7 +16,7 @@ low-level compatibility work that does not need a session handoff.
 | --- | --- | --- |
 | A laptop or other external process owns `ComputerSandbox.create()` and calls the daemon for every model turn. | An async owner creates the desktop once and sends its versioned `ComputerSessionHandle` to an explicitly placed, application-owned Modal Function. | Move the model trajectory into that Function. Keep provider SDK imports and model calls in application code, not in core. |
 | Each remote operation creates or attaches to its own desktop/client context. | The Function calls `borrow_async(handle)` exactly once around the whole trajectory. | Hoist borrowing outside the model-turn loop and release it only after the trajectory ends. |
-| Region may be absent or broad, and a mismatched caller can continue over ingress. | Primary `AsyncComputerSandbox.create()` requires an explicit environment and exact region such as `us-west-2` before allocation; the Function, observed Function runtime, and Sandbox must then match that region. | Select an exact region for both resources and make environment, CPU, memory, image, timeout, retries, scaling limits, and capacity inspectable. Use `create_unplaced()` only for an intentional low-level path without handoff. |
+| Region may be absent or broad, and a mismatched caller can continue over ingress. | Primary `AsyncComputerSandbox.create()` requires an explicit environment and a supported narrow selector such as `us-west` (or a granted granular selector) before allocation; the Function, observed Function runtime, and Sandbox must then match that selector. | Select one verifiable region selector for both resources and make environment, CPU, memory, image, timeout, retries, scaling limits, and capacity inspectable. Use `create_unplaced()` only for an intentional low-level path without handoff. |
 | Async creation may use tunnel ingress, control VNC, or warm-pool tagging even though those modes cannot produce the default handoff. | Primary `AsyncComputerSandbox.create()` rejects these modes before Modal work. | Use `create_unplaced()` for an intentional low-level owner, or select attested-tunnel/connect ingress, off/view-only VNC, and default ownership tags. |
 | `screenshots.full(storage="inline")` returns a JSON/base64-backed `Screenshot`. | The same semantic method uses the raw binary response and returns `Screenshot(bytes=...)`. | Prefer `as_bytes()` or `to_base64()` instead of reading `data_base64` directly. JSON serialization of `bytes` uses Base64URL. |
 | A provider loop calls `actions.run(...)` and then `screenshots.full()` after each model action array. | The borrowed `computer.step(...)` Interface sends the ordered array and returns one `ComputerStepResult` with `actions`, `screenshot`, and `timing`. | Replace the two calls with one step. Use its immediate post-action `screenshot` for the next model turn. Do not treat the frame as application readiness or replay a step after a possible dispatch. |

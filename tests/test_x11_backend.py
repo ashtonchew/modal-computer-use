@@ -673,6 +673,30 @@ def test_x11_screenshot_show_cursor_changes_maim_flags(tmp_path) -> None:
     assert "-u" not in maim_commands[1]
 
 
+def test_x11_file_capture_prepares_output_for_desktop_child(monkeypatch) -> None:
+    backend = RecordingX11Backend()
+    prepared: list[int] = []
+
+    async def write_png(*args: str, **_kwargs):
+        Image.new("RGB", (10, 10), "white").save(args[-1])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = write_png
+    backend._screenshots._mss.grab = lambda _source: None
+    monkeypatch.setattr(
+        screenshots_module,
+        "prepare_desktop_output_file",
+        prepared.append,
+    )
+
+    anyio.run(
+        backend.screenshot_bytes,
+        ScreenshotOptions(format="png", show_cursor=True),
+    )
+
+    assert len(prepared) == 1
+
+
 def test_x11_screenshot_bytes_skips_cursor_position_by_default(tmp_path) -> None:
     backend = RecordingX11Backend()
 

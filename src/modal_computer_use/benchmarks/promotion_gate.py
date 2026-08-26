@@ -18,6 +18,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .._regions import is_verifiable_modal_region_selector
+
 PRIOR_PUBLIC_ARM = "prior-public"
 CANDIDATE_ARM = "candidate-default"
 PROMOTION_BENCHMARK = "optimized-default-promotion"
@@ -70,7 +72,6 @@ _FORBIDDEN_KEY_PARTS = (
     "typed_text",
 )
 _FULL_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _SAFE_FAILURE_PHASES = {
     "borrow",
     "cleanup",
@@ -467,13 +468,15 @@ def _validate_configuration(
 
 def _placement(value: Any, name: str) -> dict[str, str]:
     if not isinstance(value, Mapping):
-        raise PromotionGateError(f"{name} must include cloud and exact region")
+        raise PromotionGateError(f"{name} must include cloud and verifiable region")
     cloud = value.get("cloud")
     region = value.get("region")
     if not isinstance(cloud, str) or not cloud.strip():
         raise PromotionGateError(f"{name} cloud is missing")
-    if not isinstance(region, str) or not _EXACT_REGION.fullmatch(region):
-        raise PromotionGateError(f"{name} must use an exact region")
+    if not isinstance(region, str) or not is_verifiable_modal_region_selector(region):
+        raise PromotionGateError(
+            f"{name} must use a verifiable narrow or granted granular region"
+        )
     return {"cloud": cloud, "region": region}
 
 

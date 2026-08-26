@@ -24,7 +24,10 @@ from pathlib import Path
 from time import monotonic, perf_counter_ns
 from typing import Any, Literal, cast
 
-from modal_computer_use.daemon.process_environment import desktop_process_environment
+from modal_computer_use.daemon.process_environment import (
+    desktop_process_command,
+    desktop_process_environment,
+)
 
 from ._x11_shm_worker import (
     CAPTURE_PAYLOAD,
@@ -334,7 +337,7 @@ class _SpawnedX11ScreenshotSession:
                 str(height),
             )
             self._process = subprocess.Popen(  # noqa: S603 - fixed private module argv.
-                worker_command,
+                desktop_process_command(*worker_command, environ=worker_env),
                 close_fds=True,
                 pass_fds=(child_fd,),
                 start_new_session=True,

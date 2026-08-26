@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from .daemon.process_environment import (
-    DAEMON_SERVICE_USER,
+    DAEMON_CONTROLLER_ENV,
     DESKTOP_USER,
     SHARED_PROCESS_GROUP,
     VNC_SECRET_DIR_ENV,
@@ -54,7 +54,6 @@ DESKTOP_APT_PACKAGES = [
     "x11-xserver-utils",
     "dbus-x11",
     "curl",
-    "sudo",
     "util-linux",
 ]
 
@@ -1014,49 +1013,30 @@ def _credential_boundary_commands() -> tuple[str, ...]:
 
     return (
         (
-            f"groupadd --system --gid 1900 {DAEMON_SERVICE_USER} && "
-            f"useradd --system --uid 1900 --gid {DAEMON_SERVICE_USER} "
-            f"--home-dir /var/lib/{DAEMON_SERVICE_USER} --create-home "
-            f"--shell /usr/sbin/nologin {DAEMON_SERVICE_USER}"
-        ),
-        (
             f"groupadd --system --gid 1901 {DESKTOP_USER} && "
             f"useradd --system --uid 1901 --gid {DESKTOP_USER} "
             f"--home-dir /home/desktop --create-home --shell /bin/bash {DESKTOP_USER}"
         ),
         (
             f"groupadd --system --gid 1902 {SHARED_PROCESS_GROUP} && "
-            f"usermod --append --groups {SHARED_PROCESS_GROUP} {DAEMON_SERVICE_USER} && "
             f"usermod --append --groups {SHARED_PROCESS_GROUP} {DESKTOP_USER}"
         ),
         f"install -d -m 0755 -o {DESKTOP_USER} -g {DESKTOP_USER} /home/desktop",
         (
-            f"chmod 0710 /var/lib/{DAEMON_SERVICE_USER} && "
-            f"chgrp {SHARED_PROCESS_GROUP} /var/lib/{DAEMON_SERVICE_USER}"
-        ),
-        (
-            f"install -d -m 3770 -o {DAEMON_SERVICE_USER} -g {SHARED_PROCESS_GROUP} "
+            f"install -d -m 3770 -o root -g {SHARED_PROCESS_GROUP} "
             "/home/desktop/artifacts /home/desktop/recordings"
         ),
         (
-            f"install -d -m 0700 -o {DAEMON_SERVICE_USER} -g {DAEMON_SERVICE_USER} "
+            "install -d -m 0700 -o root -g root "
             "/home/desktop/artifacts/traces"
         ),
         (
-            f"install -d -m 0700 -o {DAEMON_SERVICE_USER} -g {DAEMON_SERVICE_USER} "
+            "install -d -m 0700 -o root -g root "
             "/var/lib/computer-daemon/runtime"
         ),
         (
-            f"install -d -m 2750 -o {DAEMON_SERVICE_USER} -g {SHARED_PROCESS_GROUP} "
+            f"install -d -m 2750 -o root -g {SHARED_PROCESS_GROUP} "
             "/var/lib/computer-daemon/vnc"
-        ),
-        (
-            "printf '%s\\n' "
-            f"'Defaults:{DAEMON_SERVICE_USER} env_keep += "
-            f"\"DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS\"' "
-            f"'{DAEMON_SERVICE_USER} ALL=({DESKTOP_USER}) NOPASSWD: ALL' "
-            f"> /etc/sudoers.d/{DAEMON_SERVICE_USER}-desktop && "
-            f"chmod 0440 /etc/sudoers.d/{DAEMON_SERVICE_USER}-desktop"
         ),
     )
 
@@ -1087,7 +1067,7 @@ def _image_recipe(definition: _ImageRecipeDefinition) -> object:
                 definition.browser_prewarm
             ).lower(),
             "COMPUTER_USE_BROWSER": definition.browser or "",
-            "COMPUTER_USE_DAEMON_USER": DAEMON_SERVICE_USER,
+            DAEMON_CONTROLLER_ENV: "root",
             "COMPUTER_USE_DESKTOP_USER": DESKTOP_USER,
             VNC_SECRET_DIR_ENV: "/var/lib/computer-daemon/vnc",
             "COMPUTER_USE_RUNTIME_DIR": "/var/lib/computer-daemon/runtime",

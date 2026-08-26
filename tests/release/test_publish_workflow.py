@@ -28,7 +28,7 @@ def test_release_workflow_builds_once_and_orders_publication() -> None:
     assert "tests/test_modal_integration.py" in protected_smoke
     assert "uv run modal deploy" in protected_smoke
     assert "test_modal_deployed_function_session_handoff_smoke" in protected_smoke
-    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west-2" in protected_smoke
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west" in protected_smoke
     assert "if: always()" in protected_smoke
     assert "sandbox.terminate(wait=True)" in protected_smoke
     assert "uv run modal app stop" in protected_smoke

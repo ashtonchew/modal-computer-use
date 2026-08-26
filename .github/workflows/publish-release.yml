@@ -89,7 +89,7 @@ jobs:
       contents: read
     env:
       MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke
-      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west-2
+      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west
     steps:
       - name: Check out tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -141,10 +141,15 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
-        run: >-
-          uv run modal deploy
-          --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT"
-          tests/modal_function_session_handoff_smoke_app.py
+        run: |
+          if ! uv run modal deploy \
+            --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
+            tests/modal_function_session_handoff_smoke_app.py >/dev/null 2>&1
+          then
+            echo "::error::protected Function handoff deployment failed"
+            exit 1
+          fi
+          echo "MODAL_COMPUTER_USE_HANDOFF_DEPLOYED=1" >> "$GITHUB_ENV"
 
       - name: Run protected Function handoff smoke
         env:
@@ -153,9 +158,14 @@ jobs:
           MODAL_ENVIRONMENT: ${{ env.MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT }}
           MODAL_COMPUTER_USE_RUN_LIVE_TESTS: "1"
           MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE: "1"
-        run: >-
-          uv run pytest -m modal tests/test_modal_integration.py
-          -k test_modal_deployed_function_session_handoff_smoke -q
+        run: |
+          if ! uv run pytest -m modal tests/test_modal_integration.py \
+            -k test_modal_deployed_function_session_handoff_smoke -q >/dev/null 2>&1
+          then
+            echo "::error::protected Function handoff smoke failed"
+            exit 1
+          fi
+          echo "Protected Function handoff smoke passed"
 
       - name: Clean up protected Function handoff smoke
         if: always()
@@ -173,7 +183,7 @@ jobs:
 
           target_cleanup_status=0
           app_cleanup_status=0
-          uv run python - <<'PY' || target_cleanup_status=$?
+          uv run python - <<'PY' >/dev/null 2>&1 || target_cleanup_status=$?
           import os
 
           import modal
@@ -182,10 +192,12 @@ jobs:
           for sandbox in modal.Sandbox.list(tags={"computer-use.owner": owner}):
               sandbox.terminate(wait=True)
           PY
-          uv run modal app stop \
-            --yes \
-            --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
-            "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" || app_cleanup_status=$?
+          if [ "${MODAL_COMPUTER_USE_HANDOFF_DEPLOYED:-}" = "1" ]; then
+            uv run modal app stop \
+              --yes \
+              --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
+              "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" >/dev/null 2>&1 || app_cleanup_status=$?
+          fi
 
           if [ "$target_cleanup_status" -ne 0 ] || [ "$app_cleanup_status" -ne 0 ]
           then

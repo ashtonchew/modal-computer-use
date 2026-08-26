@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
+from .._regions import is_verifiable_modal_region_selector
 from ..image import ImageReleaseRecord
 from .costs import PRICING_SOURCES, PUBLIC_RATE_CATALOG
 
@@ -39,7 +40,6 @@ _ARMS: tuple[ImageLifecycleArmName, ...] = (
     MANAGED_EXACT_ID_ARM,
 )
 _FULL_REVISION = re.compile(r"^[0-9a-f]{40}$")
-_EXACT_REGION = re.compile(r"^[a-z][a-z0-9]*-[a-z][a-z0-9]*-[0-9][a-z0-9]*$")
 _FORBIDDEN_KEY_PARTS = (
     "authorization",
     "base_url",
@@ -91,8 +91,10 @@ class ImageLifecycleBenchmarkSpec:
             raise ValueError(f"warmup_pairs must be {DEFAULT_WARMUP_PAIRS}")
         if isinstance(self.schedule_seed, bool) or self.schedule_seed < 1:
             raise ValueError("schedule_seed must be positive")
-        if _EXACT_REGION.fullmatch(self.requested_region) is None:
-            raise ValueError("requested_region must be an exact Modal region")
+        if not is_verifiable_modal_region_selector(self.requested_region):
+            raise ValueError(
+                "requested_region must be a verifiable narrow or granted granular Modal region"
+            )
         if isinstance(self.cpu, bool) or self.cpu <= 0:
             raise ValueError("cpu must be positive")
         if isinstance(self.memory_mib, bool) or self.memory_mib < 128:
@@ -322,7 +324,7 @@ def validate_image_lifecycle_artifact(payload: Mapping[str, Any]) -> None:
     requested_region = configuration.get("requested_region")
     if (
         not isinstance(requested_region, str)
-        or _EXACT_REGION.fullmatch(requested_region) is None
+        or not is_verifiable_modal_region_selector(requested_region)
     ):
         raise ValueError("Image lifecycle requested region is invalid")
     resources = _require_mapping(configuration.get("resources"), "resources")

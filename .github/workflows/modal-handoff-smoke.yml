@@ -17,7 +17,7 @@ jobs:
       cancel-in-progress: false
     env:
       MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke
-      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west-2
+      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,6 +68,7 @@ jobs:
             echo "::error::protected Function handoff deployment failed"
             exit 1
           fi
+          echo "MODAL_COMPUTER_USE_HANDOFF_DEPLOYED=1" >> "$GITHUB_ENV"
 
       - name: Run protected Function handoff smoke
         env:
@@ -110,10 +111,12 @@ jobs:
           for sandbox in modal.Sandbox.list(tags={"computer-use.owner": owner}):
               sandbox.terminate(wait=True)
           PY
-          uv run modal app stop \
-            --yes \
-            --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
-            "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" >/dev/null 2>&1 || app_cleanup_status=$?
+          if [ "${MODAL_COMPUTER_USE_HANDOFF_DEPLOYED:-}" = "1" ]; then
+            uv run modal app stop \
+              --yes \
+              --env "$MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT" \
+              "$MODAL_COMPUTER_USE_HANDOFF_APP_NAME" >/dev/null 2>&1 || app_cleanup_status=$?
+          fi
 
           if [ "$target_cleanup_status" -ne 0 ] || [ "$app_cleanup_status" -ne 0 ]
           then

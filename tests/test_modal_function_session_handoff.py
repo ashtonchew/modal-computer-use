@@ -1962,8 +1962,8 @@ def test_deployed_handoff_smoke_source_is_bounded_and_returns_only_safe_aggregat
     assert "min_containers=0" in source
     assert "max_containers=1" in source
     assert "FUNCTION_TIMEOUT_SECONDS = 300" in source
-    assert '"MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west-2"' in source
-    assert "the handoff smoke requires one exact Modal region" in source
+    assert '"MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west"' in source
+    assert "one narrow or granted granular Modal region selector" in source
     assert "timeout=FUNCTION_TIMEOUT_SECONDS" in source
     assert "restrict_modal_access=False" in source
     assert source.count("handle.borrow_async(") == 1
@@ -2015,6 +2015,7 @@ def test_protected_workflow_scopes_and_cleans_up_handoff_smoke() -> None:
     assert "uv run modal deploy" in source
     assert "if: always()" in source
     assert "uv run modal app stop" in source
+    assert "MODAL_COMPUTER_USE_HANDOFF_DEPLOYED=1" in source
     assert "--yes" in source
     assert '"computer-use.owner": owner' in source
     assert "sandbox.terminate(wait=True)" in source

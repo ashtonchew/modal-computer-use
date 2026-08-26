@@ -32,7 +32,7 @@ def test_v2_changelog_contains_the_exact_migration_contract() -> None:
     for required_term in (
         "ComputerSessionHandle",
         "borrow_async",
-        "exact region",
+        "supported narrow selector",
         'screenshots.full(storage="inline")',
         "one `actions.run(...)` HTTP batch",
         "never replay automatically",

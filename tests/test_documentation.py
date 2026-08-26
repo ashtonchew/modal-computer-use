@@ -717,7 +717,7 @@ def test_hosted_docs_handoff_publishes_weighted_input_capacity_evidence() -> Non
     assert "scripts/run_input_capacity_gate.py" in source
 
 
-def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
+def test_api_trajectory_example_uses_one_supported_narrow_region() -> None:
     source = (DOCS / "api.md").read_text(encoding="utf-8")
     section = _section(
         source,
@@ -725,9 +725,9 @@ def test_api_trajectory_example_uses_one_exact_requested_region() -> None:
         "Constructing the context does not contact Modal",
     )
 
-    assert 'FUNCTION_REGION = "us-west-2"' in section
-    assert "Replace this with one exact region measured for your workload." in section
-    assert 'FUNCTION_REGION = "us-west"' not in section
+    assert 'FUNCTION_REGION = "us-west"' in section
+    assert "Replace this with one supported narrow region selector" in section
+    assert 'FUNCTION_REGION = "us-west-2"' not in section
     assert section.count("handle.borrow_async(") == 1
     assert "await computer.step(" in section
     code_blocks = [match.group("source") for match in PYTHON_FENCE_RE.finditer(section)]

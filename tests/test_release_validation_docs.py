@@ -126,8 +126,7 @@ def test_manual_handoff_workflow_targets_only_the_bounded_handoff_smoke() -> Non
     assert "tests/modal_function_session_handoff_smoke_app.py" in handoff
     assert HANDOFF_TEST_SELECTOR in handoff
     assert "MODAL_COMPUTER_USE_RUN_HANDOFF_SMOKE" in handoff
-    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west-2" in handoff
-    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west\n" not in handoff
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west\n" in handoff
     assert "MODAL_COMPUTER_USE_RUN_V1_SMOKE" not in handoff
     assert "MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE" not in handoff
     assert "tests/modal_function_session_handoff_smoke_app.py" not in release

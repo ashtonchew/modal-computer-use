@@ -29,7 +29,7 @@ explicit per call. Region, resources, and warm capacity remain separate applicat
 
 ## Inspect cost and placement choices
 
-Set the Sandbox environment, exact region, CPU, memory, image, browser, and timeouts in
+Set the Sandbox environment, narrow region selector, CPU, memory, image, browser, and timeouts in
 `ComputerConfig`. No SDK default selects a region, CPU, or memory value. Measure a region for your
 workload and choose resources for its capacity and cost.
 
@@ -39,7 +39,7 @@ from modal_computer_use import ComputerConfig
 config = ComputerConfig(
     runtime={
         "modal_environment": "main",
-        "modal_region": "us-west-2",
+        "modal_region": "us-west",
         "timeout_seconds": 900,
         "idle_timeout_seconds": None,
         "readiness_timeout_seconds": 120,
@@ -61,8 +61,8 @@ This report covers the Sandbox. A placed Modal Function has separate cost contro
 Function CPU, memory, image, retries, timeout, and container limits in the application that defines
 the Function. The executable
 [`modal_function_session_handoff.py`](../examples/modal_function_session_handoff.py) example keeps
-the Function and Sandbox choices together and uses the same exact region for both. Its
-`us-west-2` value is an application example, not an SDK default.
+the Function and Sandbox choices together and uses the same narrow region selector for both. Its
+`us-west` value is an application example, not an SDK default.
 
 ## Public SDK configuration
 
@@ -316,8 +316,8 @@ where stated. Artifact uploads are streamed and do not use the JSON request-body
 | `COMPUTER_USE_REJECT_QUERY_TOKENS` | `true` | Boolean. Reject credentials in URL queries; keep enabled because URLs leak into logs and history. |
 | `COMPUTER_USE_VNC_MODE` | `off` | Supported: `off`, `view_only`, `control`. The SDK generates this from `expose_vnc`. |
 | `COMPUTER_USE_VNC_PASSWORD` | unset | noVNC/x11vnc password. If VNC is enabled and unset, the daemon supervisor generates one in its private runtime directory; the Modal SDK normally generates and injects one first. Secret. |
-| `COMPUTER_USE_DAEMON_USER` | unset | Internal managed-Image service account marker. When baked into the Image, the Sandbox launcher drops the daemon to this account before startup. Managed releases without the marker fail closed; do not set it on an Image that does not provide the account. |
-| `COMPUTER_USE_DESKTOP_USER` | unset | Internal managed-Image desktop account marker. Desktop subprocesses run as this separate account and fail closed if it is missing. |
+| `COMPUTER_USE_DAEMON_CONTROLLER` | unset | Internal managed-Image lifecycle-controller marker. Modal applies `no_new_privs`, so the managed daemon stays root solely to drop GUI children to the desktop account; startup fails closed if that authority is missing. Do not set this on a custom Image. |
+| `COMPUTER_USE_DESKTOP_USER` | unset | Internal managed-Image desktop account marker. Desktop subprocesses run as this separate unprivileged account with daemon credentials removed and fail closed if the account or controller boundary is missing. |
 | `COMPUTER_USE_VNC_SECRET_DIR` | unset | Internal managed-Image directory for the VNC password file. It must be daemon-writable and desktop-group-readable without exposing other daemon runtime state. |
 
 ### Artifacts, recordings, traces, and runtime state
