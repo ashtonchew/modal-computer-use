@@ -2,10 +2,10 @@
 
 - **Status:** active specification for the published version 2 release line
 - **Prepared:** 2026-07-30
-- **Updated:** 2026-08-26
-- **Revision:** v10, maintenance and launch gates for the `2.0.1` source state
-- **Previous released baseline:** `v2.0.0`
-- **Release identity:** `v2.0.1`
+- **Updated:** 2026-09-05
+- **Revision:** v10, maintenance and launch gates for the `2.0.2` source state
+- **Previous released baseline:** `v2.0.1`
+- **Release identity:** `v2.0.2`
 - **Repository:** `ashtonchew/modal-computer-use`
 - **Python package:** `modal_computer_use`
 
@@ -50,7 +50,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 
 | Area | v10 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `2.0.1`; Python 3.12+ and `uv` are the maintained development baseline. The release tag is `v2.0.1`. |
+| Source version | The package, daemon, and OpenAPI report `2.0.2`; Python 3.12+ and `uv` are the maintained development baseline. The planned release tag is `v2.0.2`. |
 | Modal SDK | The compatible line remains `modal~=1.5.3`. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -809,7 +809,7 @@ Primary references:
 
 ## 17. Versioning and compatibility
 
-- Package, daemon, and checked-in OpenAPI versions are `2.0.1`. The release tag is `v2.0.1` after
+- Package, daemon, and checked-in OpenAPI versions are `2.0.2`. The release tag is `v2.0.2` after
   all release gates pass.
 - The optional extras are `modal`, `openai`, `anthropic`, provider-specific benchmark extras, the
   combined provider benchmark extra, and `dev`. Provider and benchmark dependencies remain outside
@@ -889,10 +889,10 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is the `2.0.1` maintenance release. The preregistered 100-pair Computer Step
-benchmark and protected Modal handoff smoke passed on 2026-08-08. Every publication remains gated
-on a fresh protected live smoke from the exact release commit, then the release-matched package
-and hosted-documentation sequence.
+The repository source is prepared for the unpublished `2.0.2` maintenance release. The
+preregistered 100-pair Computer Step benchmark and protected Modal handoff smoke passed on
+2026-08-08. Every publication remains gated on a fresh protected live smoke from the exact release
+commit, then the release-matched package and hosted-documentation sequence.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

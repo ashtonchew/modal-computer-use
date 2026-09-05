@@ -14,9 +14,10 @@ def test_v2_release_identity_is_coherent() -> None:
     openapi = json.loads((ROOT / "docs/openapi.json").read_text(encoding="utf-8"))
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert project["project"]["version"] == "2.0.1"
-    assert '__version__ = "2.0.1"' in runtime
-    assert openapi["info"]["version"] == "2.0.1"
+    assert project["project"]["version"] == "2.0.2"
+    assert '__version__ = "2.0.2"' in runtime
+    assert openapi["info"]["version"] == "2.0.2"
+    assert "## 2.0.2 - 2026-09-05" in changelog
     assert "## 2.0.1 - 2026-08-26" in changelog
     assert "## 2.0.0 - 2026-08-10" in changelog
 

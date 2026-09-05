@@ -34,7 +34,7 @@ FRESH_DISTRIBUTION_COMMANDS = (
 FROZEN_SYNC_COMMAND = "uv sync --extra dev --extra modal --frozen"
 RELEASE_BUNDLE_COMMAND = "uv run python scripts/check_release_bundle.py prepare"
 RELEASE_CANDIDATE_COMMAND = (
-    "uv run python scripts/check_release_candidate.py --tag v2.0.1"
+    "uv run python scripts/check_release_candidate.py --tag v2.0.2"
 )
 HANDOFF_TEST_SELECTOR = "-k test_modal_deployed_function_session_handoff_smoke"
 

@@ -13,8 +13,8 @@ protected release workflow.
 
 ## Release identity
 
-The current source identity is `2.0.1`. The following files must agree before a release tag is
-created:
+The current source identity is `2.0.2`, prepared for release and not yet published. The following
+files must agree before a release tag is created:
 
 - `pyproject.toml`
 - `src/modal_computer_use/_version.py`
@@ -22,7 +22,7 @@ created:
 - the daemon `/v1/version` response
 - `CHANGELOG.md`
 
-The release tag is derived from the project version (`v2.0.1` for this source). Create it only on
+The release tag is derived from the project version (`v2.0.2` for this source). Create it only on
 the exact verified `origin/main` commit and only
 after the worktree is clean. The existing release-candidate checker enforces those conditions.
 
@@ -79,8 +79,8 @@ Use this order: runtime artifacts → package → hosted documentation.
 
 Do not reorder these steps. Do not publish hosted instructions that install an unavailable package.
 
-This article-parity candidate does not require a managed or heavier named release Image. Its
-canonical examples make the inline Image recipe explicit. The runtime-artifact stage must record
+This cleanup release does not require a separately published named Image. Its canonical examples
+make the inline Image recipe explicit. The runtime-artifact stage must record
 that no separate artifact publication is required unless the final approved configuration adds
 one. Adding a named Image later is a separate provenance, correctness, cost, and benchmark change.
 

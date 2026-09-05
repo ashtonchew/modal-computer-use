@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.0.2 - 2026-09-05
+
+- Avoided unused Base64 conversion for artifact screenshots and simplified daemon scaling while
+  preserving encoded image bytes, metadata, and public behavior.
+- Shared raw action screenshot result construction between the sync and async SDK paths without
+  changing public results or byte handling.
+- Removed an unused benchmark child-input reader and replaced duplicated, superseded plans with
+  pointers to maintained contracts and retained research.
+
 ## 2.0.1 - 2026-08-26
 
 - Prevented Modal billing reconciliation selectors from appearing in benchmark JSON. Billing tag

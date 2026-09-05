@@ -133,7 +133,12 @@ def _is_within_repository(path: Path) -> bool:
 def test_local_markdown_links_and_images_resolve() -> None:
     failures: list[str] = []
     anchor_cache: dict[Path, set[str]] = {}
-    for source in _markdown_files():
+    plan_pointers = [
+        ROOT / "plans" / "README.md",
+        ROOT / "plans" / "default-optimized-path-research.md",
+        *sorted((ROOT / "plans").glob("00[1-5]-*.md")),
+    ]
+    for source in [*_markdown_files(), *plan_pointers]:
         for target in _link_targets(source):
             split = urlsplit(target)
             repository_target = _repository_web_target(target)
@@ -263,11 +268,12 @@ def test_release_docs_identify_current_v2_release() -> None:
 
     assert "git@v1.1.0" not in readme
     assert "## Unreleased" in changelog
+    assert "## 2.0.2 - 2026-09-05" in changelog
     assert "## 2.0.1 - 2026-08-26" in changelog
     assert "## 2.0.0 - 2026-08-10" in changelog
     assert "active specification for the published version 2 release line" in specification
-    assert "**Previous released baseline:** `v2.0.0`" in specification
-    assert "**Release identity:** `v2.0.1`" in specification
+    assert "**Previous released baseline:** `v2.0.1`" in specification
+    assert "**Release identity:** `v2.0.2`" in specification
 
 
 def test_hosted_documentation_release_record_names_control_points() -> None:
