@@ -107,14 +107,7 @@ class ActionsNamespace(Namespace):
         result = ActionBatchResult.model_validate(
             json.loads(base64.b64decode(result_header or "e30=").decode("utf-8"))
         )
-        return ActionScreenshotBytesResult(
-            result=result,
-            data=data,
-            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
-            width=_int_header(response_headers, "x-computer-use-width"),
-            height=_int_header(response_headers, "x-computer-use-height"),
-            size_bytes=len(data),
-        )
+        return _screenshot_bytes_result(data, response_headers, result)
 
     def run_and_observe_change_screenshot_bytes(
         self,
@@ -169,13 +162,10 @@ class ActionsNamespace(Namespace):
             _mutation=True,
         )
         result = _action_result_header(response_headers)
-        return ActionScreenshotBytesResult(
-            result=result,
-            data=data,
-            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
-            width=_int_header(response_headers, "x-computer-use-width"),
-            height=_int_header(response_headers, "x-computer-use-height"),
-            size_bytes=len(data),
+        return _screenshot_bytes_result(
+            data,
+            response_headers,
+            result,
             change_result=_json_response_header(response_headers, "x-computer-use-change-result"),
             change_timing_ms=_float_json_response_header(
                 response_headers,
@@ -196,20 +186,17 @@ class ActionsNamespace(Namespace):
         sequence: int | None = None,
         source: str = "sdk",
     ) -> ValidationResult:
-        normalized = [parse_action(action) for action in actions]
-        payload = {
-            "actions": [action.model_dump(mode="json") for action in normalized],
-            "continue_on_error": continue_on_error,
-            "screenshot_after": screenshot_after,
-            "screenshot_options": screenshot_options.model_dump(mode="json")
-            if screenshot_options
-            else None,
-            "max_action_timeout_ms": max_action_timeout_ms,
-            "call_id": call_id,
-            "run_id": run_id,
-            "sequence": sequence,
-            "source": source,
-        }
+        payload = self._run_payload(
+            actions,
+            continue_on_error=continue_on_error,
+            screenshot_after=screenshot_after,
+            screenshot_options=screenshot_options,
+            max_action_timeout_ms=max_action_timeout_ms,
+            call_id=call_id,
+            run_id=run_id,
+            sequence=sequence,
+            source=source,
+        )
         return ValidationResult.model_validate(
             self._client.post_json(
                 "/v1/actions/validate",
@@ -326,14 +313,7 @@ class AsyncActionsNamespace(AsyncNamespace):
         result = ActionBatchResult.model_validate(
             json.loads(base64.b64decode(result_header or "e30=").decode("utf-8"))
         )
-        return ActionScreenshotBytesResult(
-            result=result,
-            data=data,
-            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
-            width=_int_header(response_headers, "x-computer-use-width"),
-            height=_int_header(response_headers, "x-computer-use-height"),
-            size_bytes=len(data),
-        )
+        return _screenshot_bytes_result(data, response_headers, result)
 
     async def run_and_observe_change_screenshot_bytes(
         self,
@@ -388,13 +368,10 @@ class AsyncActionsNamespace(AsyncNamespace):
             _mutation=True,
         )
         result = _action_result_header(response_headers)
-        return ActionScreenshotBytesResult(
-            result=result,
-            data=data,
-            format=str(response_headers.get("content-type", "image/png")).removeprefix("image/"),
-            width=_int_header(response_headers, "x-computer-use-width"),
-            height=_int_header(response_headers, "x-computer-use-height"),
-            size_bytes=len(data),
+        return _screenshot_bytes_result(
+            data,
+            response_headers,
+            result,
             change_result=_json_response_header(response_headers, "x-computer-use-change-result"),
             change_timing_ms=_float_json_response_header(
                 response_headers,
@@ -429,6 +406,26 @@ class AsyncActionsNamespace(AsyncNamespace):
         return ValidationResult.model_validate(
             await self._client.post_json("/v1/actions/validate", json=payload)
         )
+
+
+def _screenshot_bytes_result(
+    data: bytes,
+    headers: Any,
+    result: ActionBatchResult,
+    *,
+    change_result: dict[str, Any] | None = None,
+    change_timing_ms: dict[str, float] | None = None,
+) -> ActionScreenshotBytesResult:
+    return ActionScreenshotBytesResult(
+        result=result,
+        data=data,
+        format=str(headers.get("content-type", "image/png")).removeprefix("image/"),
+        width=_int_header(headers, "x-computer-use-width"),
+        height=_int_header(headers, "x-computer-use-height"),
+        size_bytes=len(data),
+        change_result=change_result,
+        change_timing_ms=change_timing_ms,
+    )
 
 
 def _int_header(headers: Any, name: str) -> int | None:
