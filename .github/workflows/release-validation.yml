@@ -172,6 +172,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke
     environment: modal-smoke
+    env:
+      MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke
+      MODAL_COMPUTER_USE_HANDOFF_REGION: us-west
     timeout-minutes: 30
     concurrency:
       group: protected-modal-smoke
@@ -210,4 +213,5 @@ jobs:
           MODAL_COMPUTER_USE_RUN_LIVE_TESTS: "1"
           MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE: "1"
           MODAL_COMPUTER_USE_RUN_V1_SMOKE: "1"
+          MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE: "1"
         run: uv run pytest -m modal tests/test_modal_integration.py -q

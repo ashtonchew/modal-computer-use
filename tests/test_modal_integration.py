@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import inspect
 import os
@@ -10,6 +11,7 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -256,12 +258,31 @@ def test_modal_deployed_function_session_handoff_smoke() -> None:
             computer.detach()
 
 
+def _release_image_clipboard_test_script() -> str:
+    test_name = "test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state"
+    source = Path(__file__).with_name("test_x11_backend.py").read_text(encoding="utf-8")
+    function = next(
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == test_name
+    )
+    body = ast.get_source_segment(source, function)
+    assert body is not None
+    return (
+        "import shutil, subprocess\n"
+        "import anyio\n"
+        "from modal_computer_use.daemon.desktop.x11 import X11DesktopBackend\n"
+        "from modal_computer_use.daemon.desktop.process_runner import AsyncioProcessRunner\n"
+        f"{body}\n{test_name}()\n"
+    )
+
+
 @pytest.mark.modal
 def test_modal_release_image_x11_clipboard_ownership_smoke() -> None:
     _skip_without_modal_auth()
     _skip_without_clipboard_smoke()
 
-    from modal_computer_use import ComputerConfig, ComputerSandbox
+    from modal_computer_use import ComputerConfig, ComputerSandbox, run_modal_daemon_command
     from modal_computer_use.config import RuntimeConfig
 
     exact_region = _required_handoff_setting("MODAL_COMPUTER_USE_HANDOFF_REGION")
@@ -288,6 +309,14 @@ def test_modal_release_image_x11_clipboard_ownership_smoke() -> None:
         tags={"computer-use.smoke": "x11-clipboard-ownership"},
     )
     try:
+        # Run the exact local regression without its host-only skip decorator.
+        probe = run_modal_daemon_command(
+            computer,
+            ("python", "-c", _release_image_clipboard_test_script()),
+            path="target-loopback",
+            exec_timeout_seconds=30,
+        )
+        assert probe.returncode == 0, "release Image Xvfb clipboard regression failed"
         previous = computer.clipboard.get_text()
         assert computer.clipboard.set_text(first).ok is True
         assert computer.clipboard.get_text() == first
@@ -298,6 +327,37 @@ def test_modal_release_image_x11_clipboard_ownership_smoke() -> None:
     finally:
         computer.terminate(wait=True)
         computer.detach()
+
+
+def test_release_image_clipboard_probe_fails_without_xvfb_and_cleans_up(monkeypatch) -> None:
+    import shutil
+
+    import modal_computer_use as mcu
+
+    cleanup = []
+    computer = SimpleNamespace(
+        terminate=lambda **kwargs: cleanup.append(("terminate", kwargs)),
+        detach=lambda: cleanup.append(("detach", {})),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_skip_without_modal_auth", lambda: None)
+    monkeypatch.setenv("MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE", "1")
+    monkeypatch.setenv("MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT", "test")
+    monkeypatch.setenv("MODAL_COMPUTER_USE_HANDOFF_REGION", "us-west")
+    monkeypatch.setattr(mcu.ComputerSandbox, "create", lambda **kwargs: computer)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    def run_probe(target, command, **kwargs):
+        assert target is computer
+        assert kwargs == {"path": "target-loopback", "exec_timeout_seconds": 30}
+        assert command[:2] == ("python", "-c")
+        with pytest.raises(AssertionError):
+            exec(compile(command[2], "release-image-clipboard-test", "exec"), {})  # noqa: S102 - trusted repository test source.
+        return SimpleNamespace(returncode=1)
+
+    monkeypatch.setattr(mcu, "run_modal_daemon_command", run_probe)
+    with pytest.raises(AssertionError, match="release Image Xvfb clipboard regression failed"):
+        test_modal_release_image_x11_clipboard_ownership_smoke()
+    assert cleanup == [("terminate", {"wait": True}), ("detach", {})]
 
 
 @pytest.mark.modal

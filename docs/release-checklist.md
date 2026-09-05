@@ -171,9 +171,15 @@ Run live tests only from a trusted developer machine or protected environment wi
 credentials. The protected v1 run is:
 
 ```bash
-MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 \
+MODAL_COMPUTER_USE_RUN_LIVE_TESTS=1 MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE=1 \
+MODAL_COMPUTER_USE_RUN_V1_SMOKE=1 MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE=1 \
+MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT=modal-computer-use-smoke \
+MODAL_COMPUTER_USE_HANDOFF_REGION=us-west \
   uv run pytest -m modal tests/test_modal_integration.py -q
 ```
+
+The clipboard smoke runs the Xvfb clipboard regression inside the release Image before checking
+clipboard replacement and restoration through the SDK. Missing X11 tools fail this gate.
 
 To run only the noVNC smoke:
 
