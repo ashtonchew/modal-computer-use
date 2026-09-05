@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,7 +31,7 @@ from modal_computer_use.daemon.desktop.xtest import (
     X11InputReleaseError,
     XTestUnavailableError,
 )
-from modal_computer_use.models import ActionResult, Point, Region, ScreenshotOptions
+from modal_computer_use.models import ActionResult, Point, Region, ScreenshotOptions, sha256_bytes
 
 
 class RecordingX11Backend(X11DesktopBackend):
@@ -621,6 +622,96 @@ def test_x11_screenshot_auto_storage_spills_large_images_to_artifact(tmp_path, m
 
     assert screenshot.artifact_uri is not None
     assert screenshot.data_base64 is None
+
+
+@pytest.mark.parametrize("backend_type", [MockDesktopBackend, RecordingX11Backend])
+@pytest.mark.parametrize(
+    ("storage", "size", "provide_store", "artifact"),
+    [
+        ("inline", 1_000_001, False, False),
+        ("artifact", 1, True, True),
+        ("auto", 1_000_000, False, False),
+        ("auto", 1_000_001, True, True),
+        ("artifact", 1, False, True),
+        ("auto", 1_000_001, False, True),
+    ],
+)
+def test_screenshot_storage_preserves_capture_metadata(
+    tmp_path, monkeypatch, backend_type, storage, size, provide_store, artifact
+) -> None:
+    options = ScreenshotOptions(format="jpeg", storage=storage, show_cursor=True, scale=0.5)
+    region = Region(x=5, y=10, width=20, height=30)
+    data = b"x" * size
+
+    async def seed_capture():
+        return await MockDesktopBackend().screenshot_bytes(options, region=region)
+
+    captured = replace(
+        anyio.run(seed_capture),
+        data=data,
+        sha256=sha256_bytes(data),
+        cursor_position=Point(x=6, y=12),
+    )
+    backend = backend_type()
+    store = ArtifactStore(tmp_path / "artifacts") if provide_store else None
+
+    async def capture_bytes(actual_options, **kwargs):
+        assert actual_options == options
+        assert kwargs == {"region": region, "include_cursor_position": True}
+        return captured
+
+    if isinstance(backend, X11DesktopBackend):
+        monkeypatch.setattr(backend._screenshots, "capture_bytes", capture_bytes)
+    else:
+        monkeypatch.setattr(backend, "screenshot_bytes", capture_bytes)
+    if artifact:
+
+        def reject_base64(_data):
+            pytest.fail("artifact screenshots must not allocate discarded base64")
+
+        monkeypatch.setattr(screenshots_module.base64, "b64encode", reject_base64)
+
+    async def take_screenshot():
+        return await backend.screenshot(
+            options,
+            region=region,
+            artifact_store=store,
+            call_id="storage-check",
+            retention_class="debug",
+        )
+
+    try:
+        if artifact and store is None:
+            with pytest.raises(
+                RuntimeError, match=r"^artifact_store required for artifact screenshot storage$"
+            ):
+                anyio.run(take_screenshot)
+            return
+        screenshot = anyio.run(take_screenshot)
+    finally:
+        backend.close()
+
+    assert screenshot.format == "jpeg"
+    assert (screenshot.width, screenshot.height) == (10, 15)
+    assert screenshot.size_bytes == len(data)
+    assert screenshot.sha256 == captured.sha256
+    assert screenshot.captured_at == captured.captured_at
+    assert screenshot.coordinate_space == captured.coordinate_space
+    assert screenshot.cursor_visible is True
+    assert screenshot.cursor_position == captured.cursor_position
+    if artifact:
+        assert screenshot.data_base64 is None
+        assert store is not None
+        [info] = store.manifest("screenshots")
+        assert screenshot.artifact_uri == info.uri
+        assert info.path.endswith("_storage-check.jpg")
+        assert store.read_bytes(info.path) == data
+        assert info.content_type == "image/jpeg"
+        assert info.created_by_call_id == "storage-check"
+        assert info.retention_class == "debug"
+    else:
+        assert screenshot.artifact_uri is None
+        assert screenshot.as_bytes() == data
 
 
 def test_x11_screenshot_uses_native_png_when_smaller(monkeypatch) -> None:

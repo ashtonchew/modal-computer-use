@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import os
 import shutil
@@ -33,6 +32,7 @@ from modal_computer_use.daemon.desktop.screenshots import (
     X11ScreenshotController,
     encode_image,
     scaled_dimension,
+    screenshot_from_capture,
 )
 from modal_computer_use.daemon.desktop.windows import X11WindowController
 from modal_computer_use.daemon.desktop.xtest import X11InputSession
@@ -435,35 +435,12 @@ class MockDesktopBackend(DesktopBackend):
             region=region,
             include_cursor_position=True,
         )
-        data = captured.data
-        artifact_uri = None
-        data_base64 = base64.b64encode(data).decode("ascii")
-        if options.storage == "artifact" or (options.storage == "auto" and len(data) > 1_000_000):
-            if artifact_store is None:
-                raise RuntimeError("artifact_store required for artifact screenshot storage")
-            suffix = "jpg" if options.format == "jpeg" else options.format
-            name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-            info = artifact_store.write_bytes(
-                f"screenshots/{name}_{call_id or 'shot'}.{suffix}",
-                data,
-                content_type=f"image/{options.format}",
-                created_by_call_id=call_id,
-                retention_class=retention_class,
-            )
-            artifact_uri = info.uri
-            data_base64 = None
-        return Screenshot(
-            format=options.format,
-            width=captured.width,
-            height=captured.height,
-            size_bytes=len(data),
-            data_base64=data_base64,
-            artifact_uri=artifact_uri,
-            sha256=captured.sha256,
-            captured_at=captured.captured_at,
-            coordinate_space=captured.coordinate_space,
-            cursor_visible=captured.cursor_visible,
-            cursor_position=captured.cursor_position,
+        return screenshot_from_capture(
+            captured,
+            options,
+            artifact_store=artifact_store,
+            call_id=call_id,
+            retention_class=retention_class,
         )
 
     async def screenshot_bytes(
