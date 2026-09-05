@@ -42,7 +42,7 @@ After the source and protected Modal checks pass, create the annotated tag. Chec
 a clean checkout, and validate the release candidate:
 
 ```bash
-uv run python scripts/check_release_candidate.py --tag v2.0.1
+uv run python scripts/check_release_candidate.py --tag v2.0.2
 ```
 
 Build the wheel and source distribution once from that checkout. Do not rebuild after you upload
@@ -151,9 +151,8 @@ Confirm that:
   tests.
 - noVNC is off by default, and logs and examples do not expose tokens, noVNC URLs, typed or
   clipboard text, screenshots, recordings, artifact bytes, stdout, or stderr.
-- Immediately after the repository becomes public and before publishing `v2.0.1`, GitHub private
-  vulnerability reporting is enabled. Verify the API and signed-out form without submitting a
-  fake report.
+- Before publication, verify that GitHub private vulnerability reporting is enabled using the API
+  and signed-out form without submitting a fake report.
 
 Security-sensitive hot-path changes also require local comparison against the merge base. For
 isolated validation, collect at least 60 warmed values across multiple worker processes for 1, 50,
@@ -208,7 +207,7 @@ release manifest:
 
 ```bash
 uv run python scripts/publish_modal_image_release.py \
-  --logical-release 2.0.1 \
+  --logical-release 2.0.2 \
   --variant standard \
   --environment prod \
   --image-builder-version 2025.06 \
@@ -239,7 +238,7 @@ Before you change repository visibility or upload artifacts, confirm that:
 - `CHANGELOG.md` has a dated entry for that version and no release change remains only under
   `Unreleased`.
 - The release tag points to the exact verified source commit and uses the repository's version-tag
-  convention. `v2.0.1` uses an annotated unsigned tag.
+  convention. `v2.0.2` uses an annotated unsigned tag.
 - The wheel and source distribution were built once from that clean tagged commit. `SHA256SUMS`
   verifies both files.
 - The checked-in OpenAPI schema has no unexplained regeneration diff.
@@ -262,7 +261,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://test.pypi.org \
      --project modal-computer-use \
-     --version 2.0.1 \
+     --version 2.0.2 \
      --distributions dist/release
    ```
 
@@ -275,7 +274,7 @@ Publish one build in this order:
    uv run python scripts/verify_python_index_release.py \
      --index-url https://pypi.org \
      --project modal-computer-use \
-     --version 2.0.1 \
+     --version 2.0.2 \
      --distributions dist/release
    ```
 

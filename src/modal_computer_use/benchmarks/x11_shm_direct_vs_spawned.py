@@ -20,7 +20,6 @@ import importlib
 import json
 import os
 import platform
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -1893,14 +1892,6 @@ def build_artifact(
     finally:
         CONFIGURED_RESOURCES.clear()
         CONFIGURED_RESOURCES.update(previous)
-
-
-def _read_child_json() -> dict[str, Any]:
-    raw = sys.stdin.read()
-    value = json.loads(raw)
-    if not isinstance(value, dict):
-        raise ValueError("child input must be an object")
-    return value
 
 
 def main() -> None:

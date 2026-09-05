@@ -16,11 +16,11 @@
     }
   },
   "release": {
-    "required_package_version": "2.0.1",
+    "required_package_version": "2.0.2",
     "publication_authorization_required": true,
     "publication_order": [
       "runtime artifacts",
-      "Python package 2.0.1",
+      "Python package 2.0.2",
       "hosted documentation"
     ],
     "last_known_good": {
@@ -43,7 +43,7 @@
       "crawl every route in preview llms.txt",
       "test links and navigation in 2.x and 1.x"
     ],
-    "rollback": "Revert through a reviewed commit on protected main. Restore the preserved 1.x tree from the last-known-good tag. Do not force-push or make SDK 2.0.1 select an older runtime."
+    "rollback": "Revert through a reviewed commit on protected main. Restore the preserved 1.x tree from the last-known-good tag. Do not force-push or make SDK 2.0.2 select an older runtime."
   },
   "pages": [
     {
@@ -65,7 +65,7 @@
       "source_local": ["README.md", "examples/modal_function_session_handoff.py", "docs/configuration.md"],
       "v2_behavior": ["Show one async owner that creates the desktop once and sends a versioned handle to one explicitly placed Modal Function.", "Enter borrow_async() once around screenshot, model decision, and ordered action calls.", "Require explicit region and resource choices; keep warm capacity at zero."],
       "v1_preservation": {"route": "/v1/start/quickstart", "rule": "Keep the 1.1.0 primitive quickstart available as previous-version guidance."},
-      "tests": ["run the quickstart against the built 2.0.1 wheel", "reject missing placement before desktop mutation"],
+      "tests": ["run the quickstart against the built 2.0.2 wheel", "reject missing placement before desktop mutation"],
       "redirects": [],
       "owner": "@ashtonchew",
       "preview": "Mintlify pull-request preview",
@@ -89,14 +89,14 @@
       "route": "/start/installation",
       "page_class": "migration and version navigation",
       "source_local": ["pyproject.toml", "CHANGELOG.md", "docs/release-checklist.md"],
-      "v2_behavior": ["Install modal-computer-use[modal]==2.0.1 only after that package is available.", "Explain the optional provider extras without importing providers into core."],
+      "v2_behavior": ["Install modal-computer-use[modal]==2.0.2 only after that package is available.", "Explain the optional provider extras without importing providers into core."],
       "v1_preservation": {"route": "/v1/start/installation", "rule": "Keep the exact 1.1.0 install command under 1.x."},
-      "tests": ["install the released 2.0.1 wheel in a clean Python 3.12 environment", "check core imports without Modal or provider packages"],
+      "tests": ["install the released 2.0.2 wheel in a clean Python 3.12 environment", "check core imports without Modal or provider packages"],
       "redirects": [],
       "owner": "@ashtonchew",
       "preview": "Mintlify pull-request preview",
       "publish_order": 3,
-      "rollback": "Select 1.x installation guidance if 2.0.1 is withdrawn; never claim that an unavailable package can be installed."
+      "rollback": "Select 1.x installation guidance if 2.0.2 is withdrawn; never claim that an unavailable package can be installed."
     },
     {
       "route": "/build/action-batches",
@@ -226,7 +226,7 @@
       "owner": "@ashtonchew",
       "preview": "Mintlify pull-request preview",
       "publish_order": 3,
-      "rollback": "Revert the docs commit. Keep the SDK 2.0.1 runtime fail-closed and select preserved docs by version."
+      "rollback": "Revert the docs commit. Keep the SDK 2.0.2 runtime fail-closed and select preserved docs by version."
     },
     {
       "route": "/operate/performance",
@@ -284,7 +284,7 @@
       "route": "/reference/configuration",
       "page_class": "configuration",
       "source_local": ["docs/configuration.md", "docs/spec/product-spec.md"],
-      "v2_behavior": ["Publish the exact 2.0.1 fields, defaults, validation rules, and resolved cost and placement output.", "Mark every cost-bearing value as an explicit operator choice."],
+      "v2_behavior": ["Publish the exact 2.0.2 fields, defaults, validation rules, and resolved cost and placement output.", "Mark every cost-bearing value as an explicit operator choice."],
       "v1_preservation": {"route": "/v1/reference/configuration", "rule": "Keep the exact 1.1.0 configuration reference."},
       "tests": ["compare tables with source defaults", "validate before-and-after migration examples"],
       "redirects": [],
@@ -304,7 +304,7 @@
       "owner": "@ashtonchew",
       "preview": "Mintlify pull-request preview",
       "publish_order": 3,
-      "rollback": "Restore the prior model reference and retain the 2.0.1 page by version."
+      "rollback": "Restore the prior model reference and retain the 2.0.2 page by version."
     },
     {
       "route": "/reference/namespaces",
@@ -325,7 +325,7 @@
       "source_local": ["docs/api.md", "docs/architecture.md"],
       "v2_behavior": ["Use AsyncComputerSandbox and ComputerSessionHandle as the primary Modal lifecycle Interface.", "Keep the daemon boundary and provider-neutral core clear."],
       "v1_preservation": {"route": "/v1/reference/overview", "rule": "Keep the 1.1.0 reference overview."},
-      "tests": ["check top-level exports from a clean 2.0.1 install", "check core imports without provider packages"],
+      "tests": ["check top-level exports from a clean 2.0.2 install", "check core imports without provider packages"],
       "redirects": [],
       "owner": "@ashtonchew",
       "preview": "Mintlify pull-request preview",
@@ -349,7 +349,7 @@
       "route": "/reference/migration-v2",
       "page_class": "migration and version navigation",
       "source_local": ["CHANGELOG.md", "docs/api.md", "docs/spec/product-spec.md", "docs/hosted-documentation-release.md"],
-      "v2_behavior": ["Provide an exact current-to-2.0.1 migration table with before-and-after code.", "Explain ownership, placement, one-borrow lifecycle, binary screenshot internals, explicit costs, compatibility surfaces, and no silent fallback.", "Link both 2.x and preserved 1.x navigation."],
+      "v2_behavior": ["Use the version 2 migration table; 2.0.2 requires no API migration.", "Explain ownership, placement, one-borrow lifecycle, binary screenshot internals, explicit costs, compatibility surfaces, and no silent fallback.", "Link both 2.x and preserved 1.x navigation."],
       "v1_preservation": {"route": "/v1/reference/migration-v2", "rule": "Keep a short 1.x page that links to the 2.x migration guide without changing 1.x examples."},
       "tests": ["run every migration snippet against the matching package major", "check version selector and cross-version links"],
       "redirects": [{"from": "/reference/migration", "to": "/reference/migration-v2", "status": 308}],
