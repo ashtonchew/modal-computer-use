@@ -810,7 +810,7 @@ class X11DesktopBackend(MockDesktopBackend):
                 xclip,
                 "-selection",
                 "clipboard",
-                "-silent",
+                "-quiet",  # Keep the selection owner in the tracked foreground process.
                 environ=env,
             ),
             env=env,
