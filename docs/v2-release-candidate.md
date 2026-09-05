@@ -13,8 +13,13 @@ protected release workflow.
 
 ## Release identity
 
-The current source identity is `2.0.2`, prepared for release and not yet published. The following
-files must agree before a release tag is created:
+Version `2.0.2` is published from source commit
+`3fb4e2a4a58f5fae235515429c9219f4d964132d` under tag
+[`v2.0.2`](https://github.com/ashtonchew/modal-computer-use/releases/tag/v2.0.2).
+The [release workflow](https://github.com/ashtonchew/modal-computer-use/actions/runs/33988335940)
+passed the protected Modal gate and published the verified package artifacts.
+
+These files and responses record the package identity:
 
 - `pyproject.toml`
 - `src/modal_computer_use/_version.py`
@@ -22,9 +27,8 @@ files must agree before a release tag is created:
 - the daemon `/v1/version` response
 - `CHANGELOG.md`
 
-The release tag is derived from the project version (`v2.0.2` for this source). Create it only on
-the exact verified `origin/main` commit and only
-after the worktree is clean. The existing release-candidate checker enforces those conditions.
+Derive each release tag from the project version. Create it on the exact verified `origin/main`
+commit after the worktree is clean. The release-candidate checker enforces these conditions.
 
 The daemon keeps API version `v1`. Version 1.1 clients can continue to use the tested REST and JSON
 contracts. The version 2 placed trajectory verifies its required capabilities before it acquires a

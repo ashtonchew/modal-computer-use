@@ -50,7 +50,7 @@ initial implementation. The repository advanced by 371 commits from that revisio
 
 | Area | v10 canonical state |
 | --- | --- |
-| Source version | The package, daemon, and OpenAPI report `2.0.2`; Python 3.12+ and `uv` are the maintained development baseline. The planned release tag is `v2.0.2`. |
+| Source version | The package, daemon, and OpenAPI report `2.0.2`; Python 3.12+ and `uv` are the maintained development baseline. The release tag is `v2.0.2`. |
 | Modal SDK | The compatible line remains `modal~=1.5.3`. Every Connect Token is explicitly scoped to daemon port 8080. |
 | Architecture | Modal-native orchestration and daemon-native primitive execution remain the defining boundary. Behavior has been localized by route, desktop controller, transport, or SDK namespace. |
 | Input | A persistent native Xlib/XTest/XKB path is preferred. `xdotool` is a compatibility adapter. Fallback is allowed only before native emission starts. |
@@ -889,10 +889,10 @@ for packaging and CI parity.
 
 ## 20. Outstanding work and promotion gates
 
-The repository source is prepared for the unpublished `2.0.2` maintenance release. The
-preregistered 100-pair Computer Step benchmark and protected Modal handoff smoke passed on
-2026-08-08. Every publication remains gated on a fresh protected live smoke from the exact release
-commit, then the release-matched package and hosted-documentation sequence.
+The `2.0.2` maintenance release is published. The [release record](../v2-release-candidate.md)
+binds its source commit, tag, and successful publication workflow. The preregistered 100-pair
+Computer Step benchmark and protected Modal handoff smoke passed on 2026-08-08. Future releases
+retain the protected live gate and the package and hosted-documentation publication sequence.
 
 1. Promote first-visual-change only after its documented correctness, fallback, compatibility, and
    benchmark gates pass. Until then, retain the experimental method name and Alpha guide.

@@ -29,18 +29,19 @@ pull-request gate enabled; do not use a direct push to bypass a failed release c
 
 ## Current production baseline
 
-- **Released SDK described by the checks:** `modal-computer-use[modal]==2.0.0`
-- **Last known good revision:** `73461e8ef563e4ab372c6f051f8f142d7c5e84f2`
-- **Successful deployment record:** the successful Mintlify deployment for that revision
+- **Released SDK described by the checks:** `modal-computer-use[modal]==2.0.2`
+- **Production documentation revision:** `fb40bf051b359095ff36076a5982c77d5630c734`
+- **Successful deployment record:** [GitHub deployment 6285236375](https://api.github.com/repos/ashtonchew/modal-computer-use-docs/deployments/6285236375)
+- **Production verification:** `2026-09-05`
 - **Verified production URL:** `https://modal-computer-use.mintlify.app`
 
-The production deployment points to the last known good revision above. Use that full revision as
-the patch-release documentation rollback baseline.
+## Retained rollback baselines
 
-The annotated `docs-v1.1.0-last-known-good` tag remains the major-version rollback baseline. If
-`main` changes before publication, replace the patch baseline above with the latest revision that
-has a successful deployment to the production URL and record both revisions in the release pull
-request.
+The retained patch documentation baseline is `73461e8ef563e4ab372c6f051f8f142d7c5e84f2`,
+which describes `modal-computer-use[modal]==2.0.0`. Keep this revision available for patch rollback.
+The operator-selected SDK rollback remains `modal-computer-use==2.0.0`.
+The annotated `docs-v1.1.0-last-known-good` tag remains the major-version documentation rollback
+baseline. Record any change to a selected rollback baseline in a reviewed pull request.
 
 ## Preview a change
 
@@ -108,8 +109,8 @@ Mintlify deployment.
 1. Stop further documentation merges.
 2. Identify the failed production revision and deployment ID.
 3. Create a rollback branch from the current `main` branch.
-4. Revert the cutover changes or restore the documentation tree from
-   `docs-v1.1.0-last-known-good` in a new commit.
+4. For a patch rollback, revert the cutover or restore the retained patch baseline in a new
+   commit. Use `docs-v1.1.0-last-known-good` for a major-version documentation rollback.
 5. Keep the version selector truthful for the package versions that remain available.
 6. Run the complete local gate.
 7. Open a pull request against `main` and review its Mintlify preview.
