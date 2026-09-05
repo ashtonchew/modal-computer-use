@@ -567,24 +567,42 @@ def test_x11_clipboard_daemon_child_preserves_long_text_and_restores_state() -> 
     display_number = xvfb.stdout.readline().strip()
     assert display_number.isdigit()
     display = f":{display_number}"
-    backend = X11DesktopBackend(display=display, process_runner=AsyncioProcessRunner())
+    owners: list[subprocess.Popen[str]] = []
+
+    class DelayedClipboardBackend(X11DesktopBackend):
+        async def _spawn_clipboard_owner(self, text: str) -> subprocess.Popen[str]:
+            owner = await super()._spawn_clipboard_owner(text)
+            owners.append(owner)
+            # Allow the child to finish startup before the controller checks ownership.
+            await anyio.sleep(0.05)
+            return owner
+
+    backend = DelayedClipboardBackend(display=display, process_runner=AsyncioProcessRunner())
     previous = "previous clipboard"
     long_text = "0123456789" * 10
 
     async def exercise() -> None:
         await backend.clipboard_set(previous)
+        assert owners[0].poll() is None
         assert await backend.clipboard_get() == previous
         await backend.clipboard_set(long_text)
+        assert owners[0].poll() is not None
+        assert owners[1].poll() is None
         assert await backend.clipboard_get() == long_text
         await backend.clipboard_set(previous)
+        assert owners[1].poll() is not None
+        assert owners[2].poll() is None
         assert await backend.clipboard_get() == previous
 
     try:
         anyio.run(exercise)
     finally:
-        backend.close()
-        xvfb.terminate()
-        xvfb.wait(timeout=5)
+        try:
+            backend.close()
+            assert all(owner.poll() is not None for owner in owners)
+        finally:
+            xvfb.terminate()
+            xvfb.wait(timeout=5)
 
 
 def test_x11_cursor_position_reads_xdotool_shell_output() -> None:

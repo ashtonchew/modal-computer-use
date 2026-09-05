@@ -4,6 +4,8 @@
 
 ## 2.0.2 - 2026-09-05
 
+- Kept the X11 clipboard owner in the foreground so process checks and cleanup track the live
+  selection owner. This fixes intermittent clipboard ownership failures.
 - Avoided unused Base64 conversion for artifact screenshots and simplified daemon scaling while
   preserving encoded image bytes, metadata, and public behavior.
 - Shared raw action screenshot result construction between the sync and async SDK paths without
