@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
+from modal_computer_use.daemon.desktop.screenshots import scaled_dimension as scaled_dimension
 from modal_computer_use.daemon.errors import DaemonError
 from modal_computer_use.daemon.routes.execution import (
     ScreenshotCaptureTiming,
@@ -67,10 +68,6 @@ _RAW_SCREENSHOT_RESPONSE: dict[str, Any] = {
         },
     },
 }
-
-
-def scaled_dimension(value: int, scale: float) -> int:
-    return max(1, round(value * scale))
 
 
 def enforce_screenshot_pixels(request: Request, width: int, height: int) -> None:
