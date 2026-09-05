@@ -124,6 +124,7 @@ jobs:
           MODAL_COMPUTER_USE_RUN_LIVE_TESTS: "1"
           MODAL_COMPUTER_USE_RUN_NOVNC_SMOKE: "1"
           MODAL_COMPUTER_USE_RUN_V1_SMOKE: "1"
+          MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE: "1"
         run: uv run pytest -m modal tests/test_modal_integration.py -q
 
       - name: Create private handoff run scope

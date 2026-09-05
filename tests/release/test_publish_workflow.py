@@ -25,6 +25,8 @@ def test_release_workflow_builds_once_and_orders_publication() -> None:
     assert "needs: build" in protected_smoke
     assert "environment: modal-smoke" in protected_smoke
     assert "MODAL_COMPUTER_USE_RUN_LIVE_TESTS" in protected_smoke
+    assert 'MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE: "1"' in protected_smoke
+    assert "MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke" in protected_smoke
     assert "tests/test_modal_integration.py" in protected_smoke
     assert "uv run modal deploy" in protected_smoke
     assert "test_modal_deployed_function_session_handoff_smoke" in protected_smoke

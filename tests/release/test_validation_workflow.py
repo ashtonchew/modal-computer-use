@@ -39,3 +39,16 @@ def test_dependabot_covers_python_actions_and_native_rust() -> None:
     assert "package-ecosystem: github-actions" in source
     assert "package-ecosystem: cargo" in source
     assert "directory: /src/modal_computer_use/_native/x11_shm" in source
+
+
+def test_protected_validation_enables_release_image_clipboard_smoke() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+    protected_smoke = source[source.index("  modal-smoke:\n"):]
+
+    assert "github.event_name == 'workflow_dispatch' && inputs.run_modal_smoke" in protected_smoke
+    assert "environment: modal-smoke" in protected_smoke
+    assert 'MODAL_COMPUTER_USE_RUN_LIVE_TESTS: "1"' in protected_smoke
+    assert 'MODAL_COMPUTER_USE_RUN_X11_CLIPBOARD_SMOKE: "1"' in protected_smoke
+    assert "MODAL_COMPUTER_USE_HANDOFF_ENVIRONMENT: modal-computer-use-smoke" in protected_smoke
+    assert "MODAL_COMPUTER_USE_HANDOFF_REGION: us-west" in protected_smoke
+    assert "uv run pytest -m modal tests/test_modal_integration.py -q" in protected_smoke
